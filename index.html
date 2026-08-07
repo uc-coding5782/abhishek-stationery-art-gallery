@@ -1,0 +1,2284 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Abhishek Stationery & Art Gallery — Your one-stop shop for NCERT books, stationery, art materials, gifts, toys and flowers. Best prices guaranteed!" />
+  <meta name="keywords" content="stationery, art gallery, books, ncert, gifts, toys, flowers, art craft, school supplies, Abhishek Stationery & Art Gallery" />
+  <meta name="theme-color" content="#2874F0" />
+  <title>Abhishek Stationery & Art Gallery — Stationery, Art Supplies, Books & Gifts</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- Page Loader -->
+<div class="page-loader" id="page-loader">
+  <div style="font-size:56px;animation:float 1.5s ease-in-out infinite">🎨</div>
+  <div class="spinner" style="margin-top:12px"></div>
+  <p style="color:var(--text-muted);font-size:14px;font-family:'Nunito',sans-serif;font-weight:700;margin-top:12px">Loading Abhishek Stationery & Art Gallery…</p>
+</div>
+
+<!-- Navigation Container -->
+<div id="nav-container"></div>
+
+<!-- Toast Notifications -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- Main App -->
+<main id="app" style="min-height:calc(100vh - 116px)"></main>
+
+<!-- Footer Container -->
+<div id="footer-container"></div>
+
+<script>
+// ============================================================
+// INLINED BUNDLE — With Backend Connectivity & API Synchronization
+// ============================================================
+const API_BASE = "http://127.0.0.1:8000/api";
+let backendActive = false;
+
+async function checkBackend() {
+  try {
+    const res = await fetch("http://127.0.0.1:8000/", { method: "GET" });
+    if (res.ok) {
+      backendActive = true;
+      console.log("Connected to Abhishek Book Depot Backend Server! 🎉");
+    }
+  } catch (e) {
+    backendActive = false;
+    console.warn("FastAPI backend offline. Falling back to local storage mode.");
+  }
+}
+
+async function apiRequest(endpoint, method = "GET", body = null) {
+  if (!backendActive) return null;
+  const token = localStorage.getItem("abd_token");
+  const headers = { "Content-Type": "application/json" };
+  if (token) { headers["Authorization"] = `Bearer ${token}`; }
+  try {
+    const options = { method, headers };
+    if (body) { options.body = JSON.stringify(body); }
+    const res = await fetch(`${API_BASE}${endpoint}`, options);
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.detail || "Request failed");
+    }
+    return await res.json();
+  } catch (e) {
+    console.error(`API Error on ${endpoint}:`, e);
+    throw e;
+  }
+}
+
+async function syncLocalDataToBackend() {
+  if (!backendActive) return;
+  try {
+    const cartItems = CartState.get().items;
+    if (cartItems.length > 0) { await apiRequest("/cart", "POST", cartItems); }
+    const wishItems = WishlistState.get().items;
+    if (wishItems.length > 0) { await apiRequest("/wishlist", "POST", wishItems); }
+  } catch (e) {
+    console.error("Error syncing local data to backend:", e);
+  }
+}
+
+async function pullUserDataFromBackend() {
+  if (!backendActive) return;
+  try {
+    const cartData = await apiRequest("/cart");
+    if (cartData && cartData.items) {
+      CartState.set({ items: cartData.items });
+      Storage.set('abd_cart', cartData.items);
+    }
+    const wishData = await apiRequest("/wishlist");
+    if (wishData) {
+      WishlistState.set({ items: wishData });
+      Storage.set('abd_wishlist', wishData);
+    }
+  } catch (e) {
+    console.error("Error pulling data from backend:", e);
+  }
+}
+
+async function loadProducts() {
+  if (backendActive) {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/products");
+      if (res.ok) {
+        const db_products = await res.json();
+        window.PRODUCTS = db_products;
+        console.log(`Loaded ${db_products.length} products from backend database. 📚`);
+        return;
+      }
+    } catch (e) {
+      console.error("Failed to load products from database, using static fallback.");
+    }
+  }
+  const customEdits = Storage.get('abd_custom_products', {});
+  if (customEdits && Object.keys(customEdits).length > 0) {
+    PRODUCTS.forEach((p, idx) => {
+      if (customEdits[p.id]) {
+        PRODUCTS[idx] = { ...p, ...customEdits[p.id] };
+      }
+    });
+  }
+  window.PRODUCTS = PRODUCTS;
+}
+
+// ── Storage Helpers ──────────────────────────────────────────
+const Storage = {
+  get:(k,d=null)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}},
+  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}},
+  remove:(k)=>{try{localStorage.removeItem(k);}catch{}}
+};
+
+// ── Reactive State ────────────────────────────────────────────
+class State {
+  constructor(init){this._s={...init};this._l=new Set();}
+  get(){return{...this._s};}
+  set(patch){this._s={...this._s,...(typeof patch==='function'?patch(this._s):patch)};this._l.forEach(fn=>fn(this._s));}
+  subscribe(fn){this._l.add(fn);return()=>this._l.delete(fn);}
+}
+
+const AuthState    = new State({user:Storage.get('abd_user',null),isLoggedIn:!!Storage.get('abd_user',null),isGuest:Storage.get('abd_guest',false)});
+const CartState    = new State({items:Storage.get('abd_cart',[])});
+const WishlistState= new State({items:Storage.get('abd_wishlist',[])});
+const ThemeState   = new State({dark:Storage.get('abd_dark',false)});const saveCart = () => {
+  Storage.set('abd_cart', CartState.get().items);
+  if (backendActive && AuthState.get().isLoggedIn) {
+    apiRequest("/cart", "POST", CartState.get().items).catch(e => console.error("Cart sync error", e));
+  }
+};
+const saveWishlist = () => {
+  Storage.set('abd_wishlist', WishlistState.get().items);
+  if (backendActive && AuthState.get().isLoggedIn) {
+    apiRequest("/wishlist", "POST", WishlistState.get().items).catch(e => console.error("Wishlist sync error", e));
+  }
+};
+// ── Auth ──────────────────────────────────────────────────────
+const Auth = {
+  async register(data){
+    if (backendActive) {
+      try {
+        const res = await apiRequest("/auth/register", "POST", data);
+        if (res && res.access_token) {
+          localStorage.setItem("abd_token", res.access_token);
+          Storage.set("abd_user", res.user);
+          AuthState.set({ user: res.user, isLoggedIn: true, isGuest: false });
+          await syncLocalDataToBackend();
+          return { ok: true };
+        }
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+    const users=Storage.get('abd_users',[]);
+    if(users.find(u=>u.email===data.email))return{ok:false,error:'Email already registered'};
+    const user={id:Date.now(),...data,createdAt:new Date().toISOString(),orders:[]};
+    users.push(user);Storage.set('abd_users',users);Storage.set('abd_user',user);Storage.remove('abd_guest');
+    AuthState.set({user,isLoggedIn:true,isGuest:false});return{ok:true};
+  },
+  async login(email,password){
+    if (backendActive) {
+      try {
+        const res = await apiRequest("/auth/login", "POST", { email, password });
+        if (res && res.access_token) {
+          localStorage.setItem("abd_token", res.access_token);
+          Storage.set("abd_user", res.user);
+          AuthState.set({ user: res.user, isLoggedIn: true, isGuest: false });
+          await pullUserDataFromBackend();
+          return { ok: true };
+        }
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+    const users=Storage.get('abd_users',[]);
+    const user=users.find(u=>u.email===email&&u.password===password);
+    if(!user)return{ok:false,error:'Invalid email or password'};
+    Storage.set('abd_user',user);AuthState.set({user,isLoggedIn:true,isGuest:false});return{ok:true};
+  },
+  logout(){
+    if (backendActive) {
+      localStorage.removeItem("abd_token");
+    }
+    Storage.remove('abd_user');AuthState.set({user:null,isLoggedIn:false,isGuest:false});
+    CartState.set({items:[]});saveCart();
+    WishlistState.set({items:[]});saveWishlist();
+  },
+  continueAsGuest(){Storage.set('abd_guest',true);AuthState.set({user:null,isLoggedIn:false,isGuest:true});}
+};
+
+// ── Admin State Helpers & PIN Lock ──────────────────────────
+function isAdminUser(){
+  const u=AuthState.get().user;
+  const mode=Storage.get('abd_admin_mode',false);
+  return (u && u.role === 'admin') || mode === true;
+}
+
+function promptAdminPin(onSuccess = null) {
+  if (isAdminUser()) {
+    if (onSuccess) onSuccess();
+    return;
+  }
+
+  let modal = document.getElementById('admin-pin-modal');
+  if (modal) modal.remove();
+
+  modal = document.createElement('div');
+  modal.id = 'admin-pin-modal';
+  modal.className = 'modal-overlay';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <h3>🔐 Admin Security Verification</h3>
+        <span class="modal-close" onclick="document.getElementById('admin-pin-modal').remove()">×</span>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Enter Security PIN or Password to access Admin Panel & Store Editing.</p>
+        <div id="pin-error" style="display:none;background:#FEE2E2;color:#B91C1C;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
+        <div class="form-group">
+          <label class="form-label">Security PIN / Password</label>
+          <div class="form-input-wrap">
+            <span class="input-icon">🔑</span>
+            <input type="password" class="form-input" id="admin-pin-input" placeholder="Enter PIN (Default: 1234)" onkeydown="if(event.key==='Enter')verifyAdminPin()" autofocus />
+          </div>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:6px">Default owner PIN: <strong>1234</strong> (or password <strong>admin123</strong>)</p>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-primary btn-full" onclick="verifyAdminPin()">Unlock Admin Mode</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('admin-pin-modal').remove()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  setTimeout(() => document.getElementById('admin-pin-input')?.focus(), 100);
+
+  window._adminPinCallback = onSuccess;
+}
+
+function verifyAdminPin() {
+  const pin = document.getElementById('admin-pin-input')?.value?.trim();
+  const err = document.getElementById('pin-error');
+  const storedPin = Storage.get('abd_admin_pin', '1234');
+  
+  if (pin === storedPin || pin === 'admin123') {
+    Storage.set('abd_admin_mode', true);
+    Toast.show('👑 Admin Mode Unlocked! Welcome, Shop Owner.', 'success');
+    const modal = document.getElementById('admin-pin-modal');
+    if (modal) modal.remove();
+    const cb = window._adminPinCallback;
+    window._adminPinCallback = null;
+    if (cb) {
+      cb();
+    } else {
+      routeRender(location.hash || '#/');
+    }
+  } else {
+    if (err) {
+      err.textContent = '❌ Incorrect PIN or Password.';
+      err.style.display = 'block';
+    }
+  }
+}
+
+function openChangeAdminPinModal() {
+  if (!isAdminUser()) {
+    promptAdminPin(() => openChangeAdminPinModal());
+    return;
+  }
+  let modal = document.getElementById('change-pin-modal');
+  if (modal) modal.remove();
+
+  modal = document.createElement('div');
+  modal.id = 'change-pin-modal';
+  modal.className = 'modal-overlay';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <h3>🔑 Change Admin Security PIN</h3>
+        <span class="modal-close" onclick="document.getElementById('change-pin-modal').remove()">×</span>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Set a new secret PIN or Password to protect your store admin panel.</p>
+        <div id="cpin-error" style="display:none;background:#FEE2E2;color:#B91C1C;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px"></div>
+        
+        <div class="form-group">
+          <label class="form-label">Current PIN / Password</label>
+          <input type="password" class="form-input" id="cpin-old" placeholder="Enter current PIN (Default: 1234)" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">New PIN / Password *</label>
+          <input type="password" class="form-input" id="cpin-new" placeholder="Min. 4 characters / digits" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm New PIN *</label>
+          <input type="password" class="form-input" id="cpin-confirm" placeholder="Repeat new PIN" />
+        </div>
+        
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn btn-primary btn-full" onclick="saveNewAdminPin()">💾 Update PIN</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('change-pin-modal').remove()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function saveNewAdminPin() {
+  const oldPin = document.getElementById('cpin-old')?.value?.trim();
+  const newPin = document.getElementById('cpin-new')?.value?.trim();
+  const confirmPin = document.getElementById('cpin-confirm')?.value?.trim();
+  const err = document.getElementById('cpin-error');
+  const storedPin = Storage.get('abd_admin_pin', '1234');
+
+  if (oldPin !== storedPin && oldPin !== 'admin123') {
+    if (err) { err.textContent = '❌ Current PIN is incorrect.'; err.style.display = 'block'; }
+    return;
+  }
+  if (!newPin || newPin.length < 4) {
+    if (err) { err.textContent = '❌ New PIN must be at least 4 characters or digits.'; err.style.display = 'block'; }
+    return;
+  }
+  if (newPin !== confirmPin) {
+    if (err) { err.textContent = '❌ New PINs do not match.'; err.style.display = 'block'; }
+    return;
+  }
+
+  Storage.set('abd_admin_pin', newPin);
+  Toast.show('🔑 Admin PIN updated successfully! 🎉', 'success');
+  const modal = document.getElementById('change-pin-modal');
+  if (modal) modal.remove();
+}
+
+function toggleAdminMode() {
+  const current = Storage.get('abd_admin_mode', false);
+  if (current || (AuthState.get().user && AuthState.get().user.role === 'admin')) {
+    Storage.set('abd_admin_mode', false);
+    Toast.show('👤 Switched to Customer View', 'info');
+    routeRender(location.hash || '#/');
+  } else {
+    promptAdminPin(() => routeRender(location.hash || '#/'));
+  }
+}
+
+
+// ── Cart ──────────────────────────────────────────────────────
+const Cart = {
+  getCount:()=>CartState.get().items.reduce((s,i)=>s+i.qty,0),
+  getTotal:()=>CartState.get().items.reduce((s,i)=>s+i.price*i.qty,0),
+  getMrpTotal:()=>CartState.get().items.reduce((s,i)=>s+i.mrp*i.qty,0),
+  has:(id)=>CartState.get().items.some(i=>i.id===id),
+  add(product,qty=1){
+    CartState.set(s=>{
+      const items=[...s.items],idx=items.findIndex(i=>i.id===product.id);
+      if(idx>=0)items[idx]={...items[idx],qty:Math.min(items[idx].qty+qty,10)};
+      else items.push({...product,qty});return{items};
+    });saveCart();Toast.show('Added to cart! 🛒','success');
+  },
+  remove(id){CartState.set(s=>({items:s.items.filter(i=>i.id!==id)}));saveCart();Toast.show('Removed from cart','info');},
+  updateQty(id,qty){if(qty<1)return Cart.remove(id);CartState.set(s=>({items:s.items.map(i=>i.id===id?{...i,qty:Math.min(qty,10)}:i)}));saveCart();},
+  clear(){CartState.set({items:[]});saveCart();},
+  applyCoupon(code){
+    const c=code.toUpperCase();
+    const total=Cart.getTotal();
+    const map={BACK2SCHOOL:{type:'percent',rate:20},BOOKFAIR25:{type:'percent',rate:25},FLAT50:{type:'flat',amount:50},FIRSTBUY:{type:'percent',rate:15},GIFT10:{type:'percent',rate:10}};
+    if(map[c]){
+      const o=map[c];
+      const disc=o.type==='percent'?Math.round(total*o.rate/100):o.amount;
+      return{ok:true,discount:disc,code:c,type:o.type,rate:o.rate||null};
+    }
+    return{ok:false,error:'Invalid or expired coupon code'};
+  }
+};
+
+// ── Wishlist ──────────────────────────────────────────────────
+const Wishlist = {
+  has:(id)=>WishlistState.get().items.some(i=>i.id===id),
+  getCount:()=>WishlistState.get().items.length,
+  toggle(product){
+    if(Wishlist.has(product.id)){
+      WishlistState.set(s=>({items:s.items.filter(i=>i.id!==product.id)}));saveWishlist();Toast.show('Removed from wishlist','info');
+    }else{
+      WishlistState.set(s=>({items:[...s.items,product]}));saveWishlist();Toast.show('Added to wishlist! ❤️','success');
+    }
+  }
+};
+
+// ── Theme ─────────────────────────────────────────────────────
+const Theme = {
+  toggle(){ThemeState.set(s=>({dark:!s.dark}));const d=ThemeState.get().dark;document.documentElement.setAttribute('data-theme',d?'dark':'light');Storage.set('abd_dark',d);},
+  init(){const d=ThemeState.get().dark;document.documentElement.setAttribute('data-theme',d?'dark':'light');}
+};
+
+// ── Orders ────────────────────────────────────────────────────
+const Orders = {
+  async place(order){
+    if (backendActive) {
+      try {
+        const res = await apiRequest("/orders", "POST", order);
+        if (res) {
+          Cart.clear();
+          return res;
+        }
+      } catch (err) {
+        console.error("Order placement API error", err);
+      }
+    }
+    const orders=Storage.get('abd_orders',[]);
+    const o={id:`ABD${Date.now()}`, ...order, status:'confirmed', placedAt:new Date().toISOString(), estimatedDelivery:new Date(Date.now()+3*86400000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})};
+    orders.unshift(o);Storage.set('abd_orders',orders);Cart.clear();return o;
+  },
+  async getAll() {
+    if (backendActive && AuthState.get().isLoggedIn) {
+      try {
+        return await apiRequest("/orders");
+      } catch (e) {
+        console.error("Get orders API error", e);
+      }
+    }
+    return Storage.get('abd_orders',[]);
+  }
+};
+
+// ── RecentlyViewed ────────────────────────────────────────────
+const RecentlyViewed = {
+  add(p){let items=Storage.get('abd_recent',[]);items=[p,...items.filter(i=>i.id!==p.id)].slice(0,8);Storage.set('abd_recent',items);},
+  get:()=>Storage.get('abd_recent',[])
+};
+
+// ── Toast ─────────────────────────────────────────────────────
+const Toast = {
+  show(msg,type='info'){
+    const c=document.getElementById('toast-container');if(!c)return;
+    const t=document.createElement('div');t.className=`toast ${type}`;
+    const icons={success:'✅',error:'❌',info:'💬',warning:'⚠️'};
+    t.innerHTML=`<span class="toast-icon">${icons[type]||'💬'}</span><span class="toast-msg">${msg}</span>`;
+    c.appendChild(t);setTimeout(()=>{t.style.animation='slideInRight 0.3s ease reverse';setTimeout(()=>t.remove(),300);},3000);
+  }
+};
+
+// ── Format Utilities ──────────────────────────────────────────
+const fmt = {
+  price:(n)=>`₹${Number(n).toLocaleString('en-IN')}`,
+  number:(n)=>Number(n).toLocaleString('en-IN'),
+  date:(iso)=>new Date(iso).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}),
+  stars(rating){
+    const full=Math.floor(rating);const half=rating%1>=0.5;let h='';
+    for(let i=0;i<5;i++){if(i<full)h+='<span class="star filled">★</span>';else if(i===full&&half)h+='<span class="star half">★</span>';else h+='<span class="star">★</span>';}
+    return`<span class="stars">${h}</span>`;
+  }
+};
+
+// ── Debounce ──────────────────────────────────────────────────
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+
+// ── Search ────────────────────────────────────────────────────
+const Search = {
+  query(q, products) {
+    if (!q || !q.trim()) return products;
+    const term = q.trim().toLowerCase();
+    return products.filter(p => 
+      (p.name && p.name.toLowerCase().includes(term)) ||
+      (p.category && p.category.toLowerCase().includes(term)) ||
+      (p.brand && p.brand.toLowerCase().includes(term)) ||
+      (p.description && p.description.toLowerCase().includes(term)) ||
+      (p.tags && Array.isArray(p.tags) && p.tags.some(t => t.toLowerCase().includes(term)))
+    );
+  }
+};
+
+// ── Simple Hash Router ────────────────────────────────────────
+const Router = {
+  _routes:{},
+  register(routes){this._routes=routes;},
+  navigate(hash,replace=false){
+    if(replace)history.replaceState(null,'',hash);else history.pushState(null,'',hash);
+    this._render(hash);
+  },
+  init(){window.addEventListener('popstate',()=>this._render(location.hash||'#/'));this._render(location.hash||'#/');},
+  _render(hash){
+    const route=hash.split('?')[0];
+    let matched=null,params={};
+    for(const[pattern,handler]of Object.entries(this._routes)){
+      const p=pattern.replace(/:([^\/]+)/g,'([^/]+)');
+      const keys=[...pattern.matchAll(/:([^\/]+)/g)].map(m=>m[1]);
+      const m=route.match(new RegExp(`^${p}$`));
+      if(m){matched=handler;keys.forEach((k,i)=>{params[k]=m[i+1];});break;}
+    }
+    if(matched){matched({params,hash});window.scrollTo(0,0);}
+    else{Router.navigate('#/');}
+  }
+};
+
+// Expose globals
+window.Router=Router;window.Toast=Toast;window.Auth=Auth;window.Cart=Cart;window.Wishlist=Wishlist;window.fmt=fmt;
+
+// ============================================================
+// DATA
+// ============================================================
+const imgBase=(seed,w=400,h=400)=>`https://picsum.photos/seed/${seed}/${w}/${h}`;
+
+const CATEGORIES=[
+  {id:'books',name:'Books',icon:'📚',color:'#2874F0',bg:'#EBF2FF'},
+  {id:'ncert',name:'NCERT Books',icon:'🎓',color:'#7C3AED',bg:'#EDE9FE'},
+  {id:'stationery',name:'Stationery',icon:'✏️',color:'#059669',bg:'#ECFDF5'},
+  {id:'copies',name:'Copies',icon:'📓',color:'#D97706',bg:'#FFFBEB'},
+  {id:'registers',name:'Registers',icon:'📒',color:'#DC2626',bg:'#FEF2F2'},
+  {id:'pens',name:'Pens & Pencils',icon:'🖊️',color:'#0891B2',bg:'#ECFEFF'},
+  {id:'art',name:'Art & Craft',icon:'🎨',color:'#BE185D',bg:'#FDF2F8'},
+  {id:'flowers',name:'Flowers',icon:'🌸',color:'#E11D48',bg:'#FFF1F2'},
+  {id:'toys',name:'Toys',icon:'🧸',color:'#F59E0B',bg:'#FFFBEB'},
+  {id:'games',name:'Games',icon:'🎮',color:'#6D28D9',bg:'#EDE9FE'},
+  {id:'gifts',name:'Gifts',icon:'🎁',color:'#EC4899',bg:'#FDF2F8'},
+  {id:'school',name:'School Supplies',icon:'🎒',color:'#2563EB',bg:'#EFF6FF'},
+  {id:'office',name:'Office Supplies',icon:'🗂️',color:'#374151',bg:'#F9FAFB'},
+  {id:'decoration',name:'Decoration',icon:'✨',color:'#D97706',bg:'#FEFCE8'},
+];
+
+const PRODUCTS=[
+  {id:1,name:'NCERT Mathematics Class 10',category:'ncert',price:85,mrp:120,discount:29,rating:4.8,reviews:2341,stock:50,brand:'NCERT',image:imgBase('book1'),description:'Official NCERT Mathematics textbook for Class 10. Covers all CBSE curriculum topics.',tags:['class 10','maths','cbse']},
+  {id:2,name:'NCERT Science Class 10',category:'ncert',price:90,mrp:130,discount:31,rating:4.7,reviews:1987,stock:45,brand:'NCERT',image:imgBase('book2'),description:'Official NCERT Science textbook for Class 10.',tags:['class 10','science','cbse']},
+  {id:3,name:'NCERT Social Science Class 10',category:'ncert',price:80,mrp:115,discount:30,rating:4.6,reviews:1654,stock:40,brand:'NCERT',image:imgBase('book3'),description:'History, Geography, Political Science and Economics for Class 10.',tags:['class 10','sst','cbse']},
+  {id:4,name:'NCERT English Class 10',category:'ncert',price:75,mrp:105,discount:29,rating:4.5,reviews:1432,stock:38,brand:'NCERT',image:imgBase('book4'),description:'First Flight and Footprints Without Feet — NCERT English for Class 10.',tags:['class 10','english','cbse']},
+  {id:5,name:'NCERT Hindi Class 10',category:'ncert',price:70,mrp:100,discount:30,rating:4.4,reviews:1123,stock:35,brand:'NCERT',image:imgBase('book5'),description:'Kshitij and Kritika — NCERT Hindi textbooks for Class 10.',tags:['class 10','hindi','cbse']},
+  {id:6,name:'NCERT Mathematics Class 9',category:'ncert',price:82,mrp:118,discount:31,rating:4.7,reviews:2100,stock:48,brand:'NCERT',image:imgBase('book6'),description:'Class 9 NCERT Maths — algebra, geometry, statistics.',tags:['class 9','maths','cbse']},
+  {id:7,name:'NCERT Science Class 9',category:'ncert',price:88,mrp:125,discount:30,rating:4.6,reviews:1876,stock:42,brand:'NCERT',image:imgBase('book7'),description:'Class 9 NCERT Science covering matter, motion, biology.',tags:['class 9','science','cbse']},
+  {id:8,name:'NCERT Mathematics Class 12 Part 1',category:'ncert',price:95,mrp:140,discount:32,rating:4.9,reviews:3012,stock:55,brand:'NCERT',image:imgBase('book8'),description:'Relations, Functions, Matrices, Determinants for Class 12.',tags:['class 12','maths','cbse']},
+  {id:9,name:'NCERT Physics Class 12 Part 1',category:'ncert',price:92,mrp:135,discount:32,rating:4.8,reviews:2765,stock:50,brand:'NCERT',image:imgBase('book9'),description:'Electrostatics, Current Electricity — NCERT Physics Class 12.',tags:['class 12','physics','cbse']},
+  {id:10,name:'NCERT Chemistry Class 12 Part 1',category:'ncert',price:88,mrp:130,discount:32,rating:4.7,reviews:2543,stock:48,brand:'NCERT',image:imgBase('book10'),description:'Solid State, Solutions, Electrochemistry — NCERT Chemistry Class 12.',tags:['class 12','chemistry','cbse']},
+  {id:11,name:'Oswaal CBSE Sample Papers Class 10',category:'books',price:299,mrp:450,discount:34,rating:4.7,reviews:3421,stock:30,brand:'Oswaal',image:imgBase('book11'),description:'Latest CBSE sample papers with marking scheme.',tags:['sample papers','class 10','cbse']},
+  {id:12,name:'Arihant All-in-One Science Class 10',category:'books',price:349,mrp:520,discount:33,rating:4.6,reviews:2876,stock:25,brand:'Arihant',image:imgBase('book12'),description:'Complete study package with theory, examples, exercises.',tags:['all in one','class 10','science']},
+  {id:13,name:'MTG Rapid Revision NEET Biology',category:'books',price:459,mrp:699,discount:34,rating:4.8,reviews:4123,stock:20,brand:'MTG',image:imgBase('book13'),description:'Quick revision guide for NEET Biology with MCQs.',tags:['neet','biology','rapid revision']},
+  {id:14,name:'Arihant 40 Days JEE Maths',category:'books',price:379,mrp:560,discount:32,rating:4.7,reviews:3765,stock:22,brand:'Arihant',image:imgBase('book14'),description:'40-day crash course for JEE Main Mathematics.',tags:['jee','maths','crash course']},
+  {id:15,name:'Lucent General Knowledge 2025',category:'books',price:199,mrp:320,discount:38,rating:4.5,reviews:5234,stock:60,brand:'Lucent',image:imgBase('book15'),description:'Comprehensive GK book covering history, geography, polity.',tags:['gk','general knowledge','competitive']},
+  {id:16,name:'S.Chand Physics Class 11',category:'books',price:420,mrp:650,discount:35,rating:4.6,reviews:1987,stock:18,brand:'S.Chand',image:imgBase('book16'),description:'S Chand comprehensive Physics for Class 11.',tags:['class 11','physics','schand']},
+  {id:17,name:'Oswaal Sample Papers Class 12 PCM',category:'books',price:549,mrp:850,discount:35,rating:4.7,reviews:2876,stock:15,brand:'Oswaal',image:imgBase('book17'),description:'Physics, Chemistry & Maths sample papers bundle for Class 12.',tags:['class 12','pcm','sample papers']},
+  {id:18,name:'Arihant Reasoning Book SSC/Bank',category:'books',price:249,mrp:395,discount:37,rating:4.5,reviews:4321,stock:35,brand:'Arihant',image:imgBase('book18'),description:'Complete reasoning guide for SSC, Banking exams.',tags:['reasoning','ssc','banking']},
+  {id:19,name:'Reynolds 045 Ball Pen (Pack of 10)',category:'pens',price:99,mrp:150,discount:34,rating:4.6,reviews:8765,stock:200,brand:'Reynolds',image:imgBase('pen1'),description:'Smooth writing Reynolds 045 ball pens in blue ink. Pack of 10.',tags:['ball pen','blue','pack of 10']},
+  {id:20,name:'Cello Gripper Ball Pen (10 Pack)',category:'pens',price:110,mrp:175,discount:37,rating:4.5,reviews:6543,stock:180,brand:'Cello',image:imgBase('pen2'),description:'Ergonomic grip for comfortable writing.',tags:['ball pen','gripper','cello']},
+  {id:21,name:'Pilot V5 Hi-Tecpoint Pen',category:'pens',price:60,mrp:85,discount:29,rating:4.8,reviews:4321,stock:100,brand:'Pilot',image:imgBase('pen3'),description:'Liquid ink roller pen for precise, smooth writing.',tags:['pilot','v5','liquid ink']},
+  {id:22,name:'Parker Vector Ball Pen Blue',category:'pens',price:199,mrp:299,discount:33,rating:4.7,reviews:2134,stock:50,brand:'Parker',image:imgBase('pen4'),description:'Premium Parker ball pen with stainless steel nib.',tags:['parker','premium','gift pen']},
+  {id:23,name:'Natraj HB Pencils (Pack of 20)',category:'pens',price:59,mrp:90,discount:34,rating:4.5,reviews:5678,stock:300,brand:'Natraj',image:imgBase('pen5'),description:'Classic HB pencils with smooth graphite.',tags:['pencil','hb','natraj']},
+  {id:24,name:'Apsara Drawing Pencil Set (12 pcs)',category:'pens',price:79,mrp:120,discount:34,rating:4.6,reviews:3456,stock:150,brand:'Apsara',image:imgBase('pen6'),description:'Set of 12 drawing pencils ranging from 2H to 6B.',tags:['drawing pencil','art','apsara']},
+  {id:25,name:'Faber-Castell Colour Pencils 24',category:'pens',price:199,mrp:320,discount:38,rating:4.8,reviews:4567,stock:80,brand:'Faber-Castell',image:imgBase('pen7'),description:'24 vibrant shades, comfortable grip, break-resistant leads.',tags:['colour pencils','24 shades','faber castell']},
+  {id:26,name:'Luxor Ink Pen Set (Pack of 5)',category:'pens',price:149,mrp:220,discount:32,rating:4.4,reviews:2345,stock:70,brand:'Luxor',image:imgBase('pen8'),description:'Classic ink pens in assorted colors.',tags:['ink pen','luxor','pack of 5']},
+  {id:27,name:'Navneet Pulse Notebook 200 Pages',category:'copies',price:59,mrp:90,discount:34,rating:4.5,reviews:7890,stock:400,brand:'Navneet',image:imgBase('note1'),description:'Premium quality 200-page ruled notebook.',tags:['notebook','200 pages','navneet']},
+  {id:28,name:'Classmate Interleaf A4 Notebook',category:'copies',price:69,mrp:100,discount:31,rating:4.6,reviews:5432,stock:350,brand:'Classmate',image:imgBase('note2'),description:'A4 size interleaf notebook with ruled pages.',tags:['a4','interleaf','classmate']},
+  {id:29,name:'Navneet Jumbo Register 500 Pages',category:'registers',price:149,mrp:220,discount:32,rating:4.7,reviews:3456,stock:200,brand:'Navneet',image:imgBase('note3'),description:'Large 500-page register for accounts and records.',tags:['register','500 pages','jumbo']},
+  {id:30,name:'Classmate Science Practical File',category:'copies',price:79,mrp:120,discount:34,rating:4.5,reviews:2345,stock:150,brand:'Classmate',image:imgBase('note4'),description:'A4 science practical file with graph and plain pages.',tags:['practical file','science','classmate']},
+  {id:31,name:'Long Register 200 Pages (Pack 5)',category:'registers',price:199,mrp:299,discount:33,rating:4.4,reviews:1876,stock:120,brand:'Navneet',image:imgBase('note5'),description:'Pack of 5 long-size ruled registers.',tags:['long register','pack of 5','wholesale']},
+  {id:32,name:'Navneet A4 Copy (Pack of 10)',category:'copies',price:299,mrp:450,discount:34,rating:4.6,reviews:4321,stock:100,brand:'Navneet',image:imgBase('note6'),description:'Wholesale pack of 10 A4 ruled copies.',tags:['a4 copy','pack of 10','wholesale']},
+  {id:33,name:'Drawing Book A3 (25 Sheets)',category:'copies',price:55,mrp:80,discount:31,rating:4.5,reviews:2876,stock:200,brand:'Navneet',image:imgBase('note7'),description:'Thick A3 drawing pages for school art projects.',tags:['drawing book','a3','art']},
+  {id:34,name:'Camlin Kokuyo Acrylic Colour Set',category:'art',price:299,mrp:450,discount:34,rating:4.7,reviews:3456,stock:60,brand:'Camlin',image:imgBase('art1'),description:'12 vibrant acrylic colours for canvas, paper and fabric.',tags:['acrylic','colours','camlin']},
+  {id:35,name:'Faber-Castell Sketch Pens (48 set)',category:'art',price:449,mrp:699,discount:36,rating:4.8,reviews:5678,stock:45,brand:'Faber-Castell',image:imgBase('art2'),description:'48 bright water-based sketch pen colours. Non-toxic.',tags:['sketch pens','48 colors','faber castell']},
+  {id:36,name:'Camlin Watercolour Cake Set 24',category:'art',price:199,mrp:320,discount:38,rating:4.6,reviews:3214,stock:80,brand:'Camlin',image:imgBase('art3'),description:'24 brilliant watercolour cakes with brush.',tags:['watercolour','cake','camlin']},
+  {id:37,name:'Staedtler Oil Pastels 24 Shades',category:'art',price:249,mrp:380,discount:34,rating:4.7,reviews:2345,stock:60,brand:'Staedtler',image:imgBase('art4'),description:'24 vivid oil pastels for smooth blending.',tags:['oil pastels','24 shades','staedtler']},
+  {id:38,name:'Chart Paper Pack (10 assorted)',category:'art',price:49,mrp:75,discount:35,rating:4.4,reviews:4567,stock:300,brand:'Solo',image:imgBase('art5'),description:'10 colourful chart papers in assorted shades.',tags:['chart paper','assorted','pack of 10']},
+  {id:39,name:'Fevicol MR Adhesive 200g',category:'art',price:89,mrp:130,discount:32,rating:4.8,reviews:8765,stock:200,brand:'Fevicol',image:imgBase('art6'),description:'Multi-purpose synthetic resin adhesive. 200g pack.',tags:['fevicol','glue','adhesive']},
+  {id:40,name:'Glitter Foam Sheets (12 colours)',category:'art',price:149,mrp:220,discount:32,rating:4.5,reviews:2134,stock:100,brand:'Solo',image:imgBase('art7'),description:'12 glitter foam sheets for craft and decoration.',tags:['glitter foam','craft','decoration']},
+  {id:41,name:'Geometry Box (Classmate Pro)',category:'school',price:179,mrp:260,discount:31,rating:4.7,reviews:6543,stock:150,brand:'Classmate',image:imgBase('art8'),description:'Complete geometry box with compass, divider, protractor.',tags:['geometry box','compass','classmate']},
+  {id:42,name:'Maped Geometry Box Metallic',category:'school',price:249,mrp:380,discount:34,rating:4.8,reviews:4321,stock:80,brand:'Maped',image:imgBase('art9'),description:'Premium metallic geometry box with precision instruments.',tags:['geometry box','metallic','maped']},
+  {id:43,name:'School Bag (Class 1–5) Cartoon',category:'school',price:599,mrp:999,discount:40,rating:4.5,reviews:3456,stock:40,brand:'Solo',image:imgBase('school1'),description:'Lightweight ergonomic school bag with cartoon print.',tags:['school bag','kids','cartoon']},
+  {id:44,name:'Scientific Calculator Casio fx-82',category:'school',price:899,mrp:1299,discount:31,rating:4.9,reviews:7654,stock:30,brand:'Casio',image:imgBase('school2'),description:'Casio fx-82 scientific calculator — 240 functions.',tags:['calculator','casio','scientific']},
+  {id:45,name:'Stapler + 1000 Pins Set',category:'school',price:129,mrp:195,discount:34,rating:4.6,reviews:4567,stock:100,brand:'Kores',image:imgBase('school3'),description:'Heavy-duty mini stapler with 1000 pins.',tags:['stapler','pins','kores']},
+  {id:46,name:'Sticky Notes (6 colour packs)',category:'office',price:79,mrp:120,discount:34,rating:4.5,reviews:3456,stock:200,brand:'Solo',image:imgBase('school4'),description:'400 sticky notes in 6 bright colors.',tags:['sticky notes','post it','6 color']},
+  {id:47,name:'Scotch Tape Set (3 pack)',category:'school',price:59,mrp:90,discount:34,rating:4.4,reviews:2345,stock:300,brand:'3M',image:imgBase('school5'),description:'Pack of 3 transparent scotch tapes.',tags:['scotch tape','transparent','3m']},
+  {id:48,name:'Index File (A4, 40 pockets)',category:'office',price:199,mrp:320,discount:38,rating:4.6,reviews:2134,stock:60,brand:'Solo',image:imgBase('school6'),description:'Polypropylene file with 40 clear pockets.',tags:['file','a4','40 pockets']},
+  {id:49,name:'Eraser Pack (12 pcs, Apsara)',category:'stationery',price:45,mrp:70,discount:36,rating:4.5,reviews:5678,stock:500,brand:'Apsara',image:imgBase('school7'),description:'12 dust-free erasers for exams.',tags:['eraser','apsara','pack of 12']},
+  {id:50,name:'Sharpener Double-Hole (Pack 10)',category:'stationery',price:35,mrp:55,discount:36,rating:4.4,reviews:3456,stock:400,brand:'Natraj',image:imgBase('school8'),description:'Double-hole sharpener for standard and thick pencils.',tags:['sharpener','double hole','pack 10']},
+  {id:51,name:'Scale Ruler Set (30cm + 15cm)',category:'school',price:49,mrp:75,discount:35,rating:4.5,reviews:4321,stock:300,brand:'Classmate',image:imgBase('school9'),description:'Transparent plastic ruler with centimeter markings.',tags:['ruler','scale','classmate']},
+  {id:52,name:'Correction Fluid Pen (Whitener)',category:'stationery',price:39,mrp:60,discount:35,rating:4.4,reviews:2876,stock:200,brand:'Camel',image:imgBase('school10'),description:'Quick-dry whitener correction pen.',tags:['whitener','correction','camel']},
+  {id:53,name:'LEGO Classic Creative Bricks Set',category:'toys',price:1299,mrp:2199,discount:41,rating:4.9,reviews:8765,stock:25,brand:'LEGO',image:imgBase('toy1'),description:'480-piece classic LEGO brick set. Ages 4+.',tags:['lego','bricks','building']},
+  {id:54,name:"Rubik's Cube (Original 3x3)",category:'toys',price:299,mrp:499,discount:40,rating:4.7,reviews:5432,stock:60,brand:"Rubik's",image:imgBase('toy2'),description:"The original 3x3 Rubik's Cube. Premium smooth-turning mechanism.",tags:['rubiks cube','puzzle','brain']},
+  {id:55,name:'Hot Wheels Car Pack (10 cars)',category:'toys',price:799,mrp:1299,discount:38,rating:4.6,reviews:6543,stock:35,brand:'Hot Wheels',image:imgBase('toy3'),description:'10 die-cast Hot Wheels cars. Ages 3+.',tags:['hot wheels','cars','die cast']},
+  {id:56,name:'Soft Plush Teddy Bear 40cm',category:'toys',price:499,mrp:850,discount:41,rating:4.8,reviews:4321,stock:40,brand:'Hamleys',image:imgBase('toy4'),description:'Super soft 40cm teddy bear. Perfect gift for kids.',tags:['teddy bear','plush','soft toy']},
+  {id:57,name:'Remote Control Car 1:16 Scale',category:'toys',price:1499,mrp:2499,discount:40,rating:4.5,reviews:3456,stock:20,brand:'Toyzone',image:imgBase('toy5'),description:'High-speed RC car with rechargeable battery.',tags:['rc car','remote control','rechargeable']},
+  {id:58,name:'Doll House Playset (72 pieces)',category:'toys',price:1199,mrp:1999,discount:40,rating:4.6,reviews:2345,stock:15,brand:'Barbie',image:imgBase('toy6'),description:'Complete dollhouse with furniture and accessories.',tags:['dollhouse','barbie','playset']},
+  {id:59,name:'Magnetic Drawing Board',category:'toys',price:399,mrp:650,discount:39,rating:4.7,reviews:5678,stock:50,brand:'Toyzone',image:imgBase('toy7'),description:'Mess-free magnetic drawing board. Ages 2+.',tags:['drawing board','magnetic','kids']},
+  {id:60,name:'Play-Doh 10 Colour Set',category:'toys',price:599,mrp:999,discount:40,rating:4.8,reviews:7654,stock:45,brand:'Play-Doh',image:imgBase('toy8'),description:'Non-toxic Play-Doh in 10 vibrant colors. Ages 2+.',tags:['play doh','clay','modelling']},
+  {id:61,name:'Wooden Puzzles (100 pieces)',category:'toys',price:349,mrp:599,discount:42,rating:4.6,reviews:3456,stock:30,brand:'Funskool',image:imgBase('toy9'),description:'100-piece wooden jigsaw puzzle. Ages 4+.',tags:['puzzle','wooden','jigsaw']},
+  {id:62,name:'Action Figure Superhero Set (5pc)',category:'toys',price:699,mrp:1199,discount:42,rating:4.5,reviews:4321,stock:25,brand:'Hasbro',image:imgBase('toy10'),description:'5 superhero action figures. Ages 4+.',tags:['action figure','superhero','hasbro']},
+  {id:63,name:'Scrabble Classic Board Game',category:'games',price:999,mrp:1699,discount:41,rating:4.8,reviews:5432,stock:20,brand:'Mattel',image:imgBase('game1'),description:'Classic Scrabble word game for 2-4 players.',tags:['scrabble','word game','family']},
+  {id:64,name:'Ludo + Snakes & Ladders Combo',category:'games',price:299,mrp:499,discount:40,rating:4.6,reviews:8765,stock:60,brand:'Funskool',image:imgBase('game2'),description:'Deluxe Ludo and Snakes & Ladders board game combo.',tags:['ludo','snakes ladders','board game']},
+  {id:65,name:'Chess Set (Magnetic Travel)',category:'games',price:499,mrp:850,discount:41,rating:4.7,reviews:4321,stock:30,brand:'Staunton',image:imgBase('game3'),description:'Magnetic travel chess set with folding board.',tags:['chess','magnetic','travel']},
+  {id:66,name:'UNO Card Game Original',category:'games',price:349,mrp:599,discount:42,rating:4.9,reviews:9876,stock:80,brand:'Mattel',image:imgBase('game4'),description:'Original UNO card game — 112 cards.',tags:['uno','card game','mattel']},
+  {id:67,name:'Monopoly Classic Edition',category:'games',price:799,mrp:1399,discount:43,rating:4.7,reviews:6543,stock:20,brand:'Hasbro',image:imgBase('game5'),description:'Classic Monopoly board game.',tags:['monopoly','board game','hasbro']},
+  {id:68,name:'Jenga Classic Wooden Blocks',category:'games',price:599,mrp:999,discount:40,rating:4.8,reviews:5678,stock:25,brand:'Hasbro',image:imgBase('game6'),description:'Original Jenga with 54 hardwood blocks.',tags:['jenga','wooden','skill game']},
+  {id:69,name:'Carrom Board (Full Size, 4mm)',category:'games',price:1499,mrp:2499,discount:40,rating:4.6,reviews:4321,stock:10,brand:'Syndicate',image:imgBase('game7'),description:'Full size 74x74cm carrom board with coins and striker.',tags:['carrom','board','full size']},
+  {id:70,name:'Badminton Racket Set (2 rackets)',category:'games',price:799,mrp:1299,discount:38,rating:4.5,reviews:3456,stock:30,brand:'Yonex',image:imgBase('game8'),description:'2 rackets with 3 shuttlecocks. Great for beginners.',tags:['badminton','racket','sports']},
+  {id:71,name:'Greeting Card Pack (Birthday x12)',category:'gifts',price:149,mrp:250,discount:40,rating:4.6,reviews:4321,stock:100,brand:'Archies',image:imgBase('gift1'),description:'Pack of 12 premium birthday greeting cards.',tags:['greeting cards','birthday','pack of 12']},
+  {id:72,name:'Gift Wrap Paper Roll (6 designs)',category:'gifts',price:199,mrp:350,discount:43,rating:4.5,reviews:2345,stock:80,brand:'Solo',image:imgBase('gift2'),description:'6 beautiful gift wrap designs on rolls.',tags:['gift wrap','wrapping paper','6 designs']},
+  {id:73,name:'Ribbon & Bow Set (30 pcs)',category:'gifts',price:99,mrp:175,discount:43,rating:4.4,reviews:1876,stock:150,brand:'Solo',image:imgBase('gift3'),description:'30 pieces of assorted ribbons and bows.',tags:['ribbon','bow','gift decoration']},
+  {id:74,name:'Gift Box Set (3 sizes, 5 boxes)',category:'gifts',price:249,mrp:420,discount:41,rating:4.6,reviews:3456,stock:60,brand:'Solo',image:imgBase('gift4'),description:'5 premium gift boxes in 3 sizes.',tags:['gift box','premium','assorted']},
+  {id:75,name:'Personalized Pen Gift Set',category:'gifts',price:399,mrp:650,discount:39,rating:4.7,reviews:2876,stock:40,brand:'Parker',image:imgBase('gift5'),description:'Premium pen gift set in beautiful packaging.',tags:['pen gift','corporate','premium']},
+  {id:76,name:'Photo Frame (5x7) Golden Border',category:'gifts',price:299,mrp:499,discount:40,rating:4.5,reviews:2134,stock:50,brand:'Archies',image:imgBase('gift6'),description:'5x7 inch photo frame with golden border.',tags:['photo frame','golden','5x7']},
+  {id:77,name:'Tissue Paper (Decorative, 50 sheets)',category:'gifts',price:89,mrp:150,discount:41,rating:4.4,reviews:1654,stock:120,brand:'Solo',image:imgBase('gift7'),description:'50 sheets of decorative tissue paper.',tags:['tissue paper','decorative','gift bag']},
+  {id:78,name:'Balloon Pack (50 pcs Latex)',category:'decoration',price:99,mrp:175,discount:43,rating:4.5,reviews:5678,stock:300,brand:'Anagram',image:imgBase('gift8'),description:'50 high-quality latex balloons in assorted colors.',tags:['balloons','latex','party']},
+  {id:79,name:'Happy Birthday Banner Combo',category:'decoration',price:149,mrp:250,discount:40,rating:4.6,reviews:3456,stock:80,brand:'Solo',image:imgBase('gift9'),description:'Birthday banner, star balloons, confetti combo.',tags:['birthday banner','decoration','combo']},
+  {id:80,name:'Scented Candles Set (6 pcs)',category:'decoration',price:299,mrp:499,discount:40,rating:4.7,reviews:4321,stock:40,brand:'Iris',image:imgBase('gift10'),description:'6 premium soy wax scented candles.',tags:['candles','scented','soy wax']},
+  {id:81,name:'Red Rose Bouquet (12 roses)',category:'flowers',price:599,mrp:999,discount:40,rating:4.9,reviews:5432,stock:20,brand:'Fresh',image:imgBase('flower1'),description:'Beautiful fresh red roses in premium bouquet.',tags:['roses','red','bouquet']},
+  {id:82,name:'Mixed Flower Arrangement',category:'flowers',price:799,mrp:1399,discount:43,rating:4.8,reviews:3456,stock:15,brand:'Fresh',image:imgBase('flower2'),description:'Premium mixed flowers with lilies, roses and carnations.',tags:['mixed flowers','arrangement','premium']},
+  {id:83,name:'Artificial Flower Bunch (Silk)',category:'flowers',price:299,mrp:499,discount:40,rating:4.6,reviews:2345,stock:50,brand:'Craftghar',image:imgBase('flower3'),description:'Realistic silk artificial flower bunch for decoration.',tags:['artificial flowers','silk','decoration']},
+  {id:84,name:'Sunflower Bouquet (8 stems)',category:'flowers',price:449,mrp:750,discount:40,rating:4.7,reviews:2876,stock:12,brand:'Fresh',image:imgBase('flower4'),description:'8 bright fresh sunflowers in gift-ready bouquet.',tags:['sunflower','bouquet','yellow']},
+  {id:85,name:'Desktop Mini Succulent Plant',category:'flowers',price:199,mrp:349,discount:43,rating:4.8,reviews:4321,stock:30,brand:'Ugaoo',image:imgBase('flower5'),description:'Easy-care desktop succulent in cute pot.',tags:['succulent','plant','desktop']},
+  {id:86,name:'Rose & Lily Combo Bouquet',category:'flowers',price:699,mrp:1199,discount:42,rating:4.9,reviews:3210,stock:10,brand:'Fresh',image:imgBase('flower6'),description:'Beautiful combination of red roses and white lilies.',tags:['rose','lily','combo']},
+  {id:87,name:'Spiral Binder A4 (Pack of 5)',category:'office',price:249,mrp:399,discount:38,rating:4.5,reviews:2134,stock:80,brand:'Solo',image:imgBase('office1'),description:'A4 spiral binders with 100 pages each. Pack of 5.',tags:['binder','spiral','a4']},
+  {id:88,name:'Desk Organiser (5 compartments)',category:'office',price:399,mrp:650,discount:39,rating:4.6,reviews:2876,stock:35,brand:'Solo',image:imgBase('office2'),description:'5-compartment desk organiser for pens and files.',tags:['desk organiser','office','storage']},
+  {id:89,name:'Printer Paper A4 (500 sheets)',category:'office',price:399,mrp:600,discount:34,rating:4.7,reviews:4567,stock:100,brand:'JK',image:imgBase('office3'),description:'JK Copier 75 GSM A4 printer paper. 500 sheets.',tags:['printer paper','a4','jk copier']},
+  {id:90,name:'Whiteboard Marker Set (12 pcs)',category:'office',price:199,mrp:320,discount:38,rating:4.6,reviews:3456,stock:60,brand:'Camlin',image:imgBase('office4'),description:'12 dry-erase whiteboard markers in assorted colors.',tags:['whiteboard','marker','dry erase']},
+  {id:91,name:'Lever Arch File (A4, Pack 2)',category:'office',price:299,mrp:499,discount:40,rating:4.5,reviews:2345,stock:50,brand:'Solo',image:imgBase('office5'),description:'Heavy-duty lever arch files for document storage.',tags:['lever arch','file','document']},
+  {id:92,name:'Business Card Holder (100 cards)',category:'office',price:149,mrp:249,discount:40,rating:4.4,reviews:1654,stock:40,brand:'Solo',image:imgBase('office6'),description:'Transparent business card holder.',tags:['business card','holder','office']},
+  {id:93,name:'Lunch Box (3 tier, Steel)',category:'school',price:699,mrp:1199,discount:42,rating:4.7,reviews:5678,stock:30,brand:'Milton',image:imgBase('extra1'),description:'3-tier stainless steel lunch box. Leak-proof.',tags:['lunch box','steel','milton']},
+  {id:94,name:'Water Bottle (1L, Tritan)',category:'school',price:499,mrp:850,discount:41,rating:4.8,reviews:6543,stock:50,brand:'Nalgene',image:imgBase('extra2'),description:'BPA-free Tritan plastic 1-litre sports water bottle.',tags:['water bottle','tritan','1 litre']},
+  {id:95,name:'Pencil Pouch (Zipper, 3 pockets)',category:'school',price:199,mrp:350,discount:43,rating:4.6,reviews:4321,stock:80,brand:'Classmate',image:imgBase('extra3'),description:'Large 3-pocket pencil pouch. Water-resistant.',tags:['pencil pouch','zipper','classmate']},
+  {id:96,name:'Hindi Grammar Book Class 6-8',category:'books',price:149,mrp:250,discount:40,rating:4.5,reviews:2134,stock:40,brand:'S.Chand',image:imgBase('extra4'),description:'Complete Hindi grammar for Classes 6 to 8.',tags:['hindi grammar','class 6-8','schand']},
+  {id:97,name:'English Grammar (Wren & Martin)',category:'books',price:349,mrp:599,discount:42,rating:4.9,reviews:12345,stock:45,brand:'S.Chand',image:imgBase('extra5'),description:'The legendary Wren & Martin English Grammar book.',tags:['english grammar','wren martin','schand']},
+  {id:98,name:'Colorful Washi Tape Set (20 rolls)',category:'art',price:299,mrp:499,discount:40,rating:4.7,reviews:3456,stock:60,brand:'Solo',image:imgBase('extra6'),description:'20 rolls of decorative washi tape.',tags:['washi tape','decorative','scrapbook']},
+  {id:99,name:'Mini Stapler + 500 Staples',category:'stationery',price:89,mrp:140,discount:36,rating:4.5,reviews:4567,stock:150,brand:'Kores',image:imgBase('extra7'),description:'Compact mini stapler with 500 staples.',tags:['stapler','mini','kores']},
+  {id:100,name:'Page Flags / Tab Stickers (300 pcs)',category:'stationery',price:59,mrp:99,discount:40,rating:4.5,reviews:3210,stock:250,brand:'Solo',image:imgBase('extra8'),description:'300 transparent sticky tab page flags.',tags:['page flags','tabs','sticky']},
+  {id:101,name:'Maths Activity Kit (Class 1-5)',category:'toys',price:499,mrp:850,discount:41,rating:4.8,reviews:4321,stock:25,brand:'Orbo',image:imgBase('extra9'),description:'Complete maths activity kit with abacus, number cards.',tags:['maths kit','activity','kids']},
+  {id:102,name:'Hindi Story Books Set (5 books)',category:'books',price:299,mrp:499,discount:40,rating:4.7,reviews:2876,stock:30,brand:'Rajpal',image:imgBase('extra10'),description:'5 popular Hindi story books for children aged 6-12.',tags:['hindi stories','kids books','rajpal']},
+  {id:103,name:'Flash Cards (Alphabet + Numbers)',category:'toys',price:199,mrp:350,discount:43,rating:4.8,reviews:5432,stock:60,brand:'Orbo',image:imgBase('extra11'),description:'104 educational flash cards. Laminated, durable.',tags:['flash cards','alphabet','numbers']},
+  {id:104,name:'Foam Stickers Sheet Pack (10 pcs)',category:'art',price:79,mrp:130,discount:39,rating:4.5,reviews:2134,stock:120,brand:'Solo',image:imgBase('extra12'),description:'10 sheets of foam stickers with animals and shapes.',tags:['foam stickers','kids','craft']},
+  {id:105,name:'Origami Paper 200 sheets (20 clr)',category:'art',price:149,mrp:249,discount:40,rating:4.7,reviews:3456,stock:80,brand:'Solo',image:imgBase('extra13'),description:'200 sheets of square origami paper in 20 colors.',tags:['origami','paper','20 colors']},
+];
+window.PRODUCTS = PRODUCTS;
+
+const OFFERS=[
+  {id:1,code:'BACK2SCHOOL',discount:20,type:'percent',minOrder:299,desc:'20% off on School Supplies'},
+  {id:2,code:'BOOKFAIR25',discount:25,type:'percent',minOrder:499,desc:'25% off on All Books'},
+  {id:3,code:'FLAT50',discount:50,type:'flat',minOrder:199,desc:'Flat ₹50 Off on Any Order'},
+  {id:4,code:'FIRSTBUY',discount:15,type:'percent',minOrder:0,desc:'15% off on First Purchase'},
+  {id:5,code:'GIFT10',discount:10,type:'percent',minOrder:399,desc:'10% off on Gift Items'},
+];
+
+const BANNERS=[
+  {title:'Back To School Sale!',subtitle:'Flat 20% OFF on School Supplies',cta:'Shop Now',cat:'school',gradient:'linear-gradient(135deg,#2874F0,#0052CC)',badge:'20% OFF',emoji:'🎒'},
+  {title:'Latest NCERT Books In Stock!',subtitle:'All Classes Available — Limited Stock',cta:'Buy Now',cat:'ncert',gradient:'linear-gradient(135deg,#7C3AED,#4C1D95)',badge:'New Stock',emoji:'📚'},
+  {title:'New Gift Collection 🎁',subtitle:'Unique Gifts for Every Occasion',cta:'Explore',cat:'gifts',gradient:'linear-gradient(135deg,#EC4899,#BE185D)',badge:'New!',emoji:'🎁'},
+  {title:'Premium Flower Collection 🌸',subtitle:'Fresh Flowers • Bouquets • Plants',cta:'Shop Flowers',cat:'flowers',gradient:'linear-gradient(135deg,#E11D48,#9F1239)',badge:'Fresh Daily',emoji:'🌸'},
+  {title:'Trending Toys & Games 🎮',subtitle:'Up to 43% OFF • All Ages',cta:'View All',cat:'toys',gradient:'linear-gradient(135deg,#F59E0B,#D97706)',badge:'Up to 43% Off',emoji:'🎮'},
+];
+
+const TESTIMONIALS=[
+  {name:'Priya Sharma',avatar:imgBase('face1',60,60),rating:5,text:"Best stationery shop in town! Got all my NCERT books and art supplies in one place.",date:'2 days ago'},
+  {name:'Rahul Gupta',avatar:imgBase('face2',60,60),rating:5,text:'Excellent quality products at very affordable prices. Fast delivery too!',date:'1 week ago'},
+  {name:'Anjali Singh',avatar:imgBase('face3',60,60),rating:4,text:"Ordered gifts and flowers for my sister's birthday — beautifully packaged!",date:'3 days ago'},
+  {name:'Mohit Verma',avatar:imgBase('face4',60,60),rating:5,text:'Great toy collection! My kids love the LEGO set I bought from here.',date:'5 days ago'},
+];
+
+const ADMIN_STATS={totalOrders:1247,totalRevenue:189450,totalProducts:105,totalCustomers:892,pendingOrders:23,revenueGrowth:18.5,ordersGrowth:12.3,customersGrowth:8.7};
+
+// ============================================================
+// COMPONENTS
+// ============================================================
+function renderStars(rating){
+  const full=Math.floor(rating);const half=rating%1>=0.5;let h='';
+  for(let i=0;i<5;i++){if(i<full)h+='<span class="star filled">★</span>';else if(i===full&&half)h+='<span class="star half">★</span>';else h+='<span class="star">★</span>';}
+  return`<span class="stars">${h}</span>`;
+}
+
+function renderProductCard(p){
+  const inWish=Wishlist.has(p.id),inCart=Cart.has(p.id);
+  const stock=p.stock<5&&p.stock>0?`<span class="product-stock-low">Only ${p.stock} left!</span>`:p.stock===0?`<span class="product-stock-out">Out of Stock</span>`:'';
+  const adminOverlay = isAdminUser() ? `<div class="product-admin-overlay">
+    <button class="product-admin-btn" onclick="event.stopPropagation();openEditProductModal(${p.id})">✏️ Edit</button>
+    <button class="product-admin-btn" onclick="event.stopPropagation();openEditProductModal(${p.id},'image')">🖼️ Image</button>
+    <button class="product-admin-btn del" onclick="event.stopPropagation();delProduct(${p.id})">🗑️</button>
+  </div>` : '';
+  return`<div class="product-card" onclick="navigate('#/product/${p.id}')">
+    <div class="product-img-wrap">
+      ${adminOverlay}
+      <span class="product-discount-badge">-${p.discount}%</span>
+      <img class="product-img" src="${p.image}" alt="${p.name}" loading="lazy" onerror="this.src='https://picsum.photos/seed/default${p.id}/400/400'" />
+      <button class="product-wishlist-btn${inWish?' active':''}" id="wish-btn-${p.id}" onclick="event.stopPropagation();doToggleWishlist(${p.id})">${inWish?'❤️':'🤍'}</button>
+      <div class="product-quick-view">👁 Quick View</div>
+    </div>
+    <div class="product-info">
+      <div class="product-brand">${p.brand}</div>
+      <div class="product-name">${p.name}</div>
+      <div class="product-rating">${renderStars(p.rating)}<span class="rating-count">(${fmt.number(p.reviews)})</span></div>
+      <div class="product-price-row"><span class="price-current">${fmt.price(p.price)}</span><span class="price-mrp">${fmt.price(p.mrp)}</span><span class="price-off">${p.discount}% off</span></div>
+      ${stock}
+      <div class="product-actions">
+        <button class="btn-add-cart${inCart?' added':''}" id="cart-btn-${p.id}" onclick="event.stopPropagation();doAddToCart(${p.id})"${p.stock===0?' disabled':''}>${inCart?'✓ Added':'🛒 Add to Cart'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderProductCardList(p){
+  const inCart=Cart.has(p.id),inWish=Wishlist.has(p.id);
+  const adminBtns = isAdminUser() ? `<div style="display:flex;gap:6px;margin-top:6px">
+    <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditProductModal(${p.id})">✏️ Edit Product</button>
+    <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditProductModal(${p.id},'image')">🖼️ Change Image</button>
+    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();delProduct(${p.id})">🗑️ Delete</button>
+  </div>` : '';
+  return`<div class="product-card-list" onclick="navigate('#/product/${p.id}')">
+    <div class="product-img-wrap" style="width:180px;flex-shrink:0;height:160px"><span class="product-discount-badge">-${p.discount}%</span><img class="product-img" src="${p.image}" alt="${p.name}" loading="lazy" /></div>
+    <div class="product-info" style="flex:1;padding:14px">
+      <div class="product-brand">${p.brand}</div>
+      <div class="product-name" style="font-size:15px">${p.name}</div>
+      <div class="product-rating">${renderStars(p.rating)}<span class="rating-count">(${fmt.number(p.reviews)} reviews)</span></div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">${p.description.substring(0,100)}...</div>
+      <div class="product-price-row"><span class="price-current">${fmt.price(p.price)}</span><span class="price-mrp">${fmt.price(p.mrp)}</span><span class="price-off">${p.discount}% off</span></div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();doAddToCart(${p.id})">${inCart?'✓ Added':'🛒 Add to Cart'}</button>
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();doToggleWishlist(${p.id})">${inWish?'❤️ Wishlisted':'🤍 Wishlist'}</button>
+      </div>
+      ${adminBtns}
+    </div>
+  </div>`;
+}
+
+function renderSectionHeader(title,icon,href=null){
+  return`<div class="section-header"><div><h2 class="section-title"><span class="title-icon">${icon}</span>${title}</h2><div class="section-accent"></div></div>${href?`<a class="section-view-all" href="${href}" onclick="event.preventDefault();navigate('${href}')">View All →</a>`:''}</div>`;
+}
+
+function renderOffersStrip(){
+  const items=['🎒 Back to School Sale — 20% OFF','📚 NCERT Books — All Classes In Stock','🎁 New Gift Collection Arrived','🖊️ Buy 2 Get 1 FREE on Pens','🌸 Fresh Flower Bouquets Available','🎮 Toys Up to 43% OFF','📦 Free Delivery on Orders Above ₹499','🎨 Art & Craft Kits Starting ₹49'];
+  const rep=[...items,...items].map(t=>`<span class="offers-strip-item">•&nbsp;&nbsp;${t}</span>`).join('');
+  return`<div class="offers-strip"><div class="offers-strip-inner">${rep}</div></div>`;
+}
+
+const DEFAULT_STORE_SETTINGS = {
+  name: "ABHISHEK STATIONERY & ART GALLERY",
+  logoIcon: "🎨",
+  description: "Your one-stop destination for stationery, art materials, books, gifts, flowers, toys and everything in between. Serving the community with love since 2005.",
+  phone: "+91 98765 43210",
+  email: "info@abhishekstationery.com",
+  address: "Main Market, Sector 12",
+  timings: "Monday – Saturday: 9 AM – 8 PM",
+  facebook: "https://facebook.com",
+  instagram: "https://instagram.com",
+  whatsapp: "+919876543210",
+  youtube: "https://youtube.com",
+  copyright: "© 2025 Abhishek Stationery & Art Gallery. Made with ❤️ for our community."
+};
+
+function getStoreSettings() {
+  const saved = Storage.get('abd_store_settings', {});
+  return { ...DEFAULT_STORE_SETTINGS, ...saved };
+}
+
+function renderNavbar(){
+  const s = getStoreSettings();
+  const nameParts = s.name.split(' ');
+  const firstWord = nameParts[0] || 'ABHISHEK';
+  const restWords = nameParts.slice(1).join(' ') || 'STATIONERY & ART GALLERY';
+  const cc=Cart.getCount(),wc=Wishlist.getCount();
+  const cats=[{id:'all',name:'All',icon:'🏪'},{id:'ncert',name:'NCERT',icon:'🎓'},{id:'books',name:'Books',icon:'📚'},{id:'stationery',name:'Stationery',icon:'✏️'},{id:'pens',name:'Pens',icon:'🖊️'},{id:'copies',name:'Copies',icon:'📓'},{id:'art',name:'Art & Craft',icon:'🎨'},{id:'toys',name:'Toys',icon:'🧸'},{id:'games',name:'Games',icon:'🎮'},{id:'gifts',name:'Gifts',icon:'🎁'},{id:'flowers',name:'Flowers',icon:'🌸'},{id:'offers',name:'Offers 🔥',icon:''}];
+  const dark=ThemeState.get().dark;
+  const adminActive = isAdminUser();
+  const adminTopBar = adminActive ? `<div class="admin-mode-topbar">
+    <div><span>👑 <strong class="admin-mode-badge">ADMIN MODE ACTIVE</strong></span></div>
+    <div class="admin-topbar-actions">
+      <button class="admin-topbar-btn" onclick="openAddProductModal()">+ Add Product</button>
+      <button class="admin-topbar-btn" onclick="navigate('#/admin')">📊 Admin Panel</button>
+      <button class="admin-topbar-btn" onclick="openChangeAdminPinModal()">🔑 Change PIN</button>
+      <button class="admin-topbar-btn btn-exit" onclick="toggleAdminMode()">Exit Admin Mode</button>
+    </div>
+  </div>` : '';
+
+  return`${adminTopBar}<nav class="navbar"><div class="nav-inner">
+    <a class="nav-logo" href="#/" onclick="event.preventDefault();navigate('#/')"><span class="logo-icon">${s.logoIcon}</span><div><div class="logo-text">${firstWord}</div><div class="logo-sub">${restWords}</div></div></a>
+    <div class="nav-search"><div class="search-wrap"><input type="text" id="nav-search-input" placeholder="Search books, stationery, art, gifts…" autocomplete="off" onkeydown="if(event.key==='Enter')triggerGlobalSearch()" /><button class="search-btn" id="nav-search-btn" onclick="triggerGlobalSearch()">🔍</button></div><div class="search-suggestions" id="search-suggestions" style="display:none"></div></div>
+    <div class="nav-actions">
+      <button class="nav-btn" onclick="toggleThemeFn()" title="Theme"><span class="btn-icon" id="theme-icon">${dark?'☀️':'🌙'}</span><span class="btn-label">Theme</span></button>
+      <button class="nav-btn" onclick="toggleAdminMode()" title="${adminActive?'Admin Mode Active':'Toggle Admin Access'}" style="${adminActive?'color:#FFD700':''}"><span class="btn-icon">👑</span><span class="btn-label">${adminActive?'Admin ON':'Admin'}</span></button>
+      <a class="nav-btn" href="#/wishlist" onclick="event.preventDefault();navigate('#/wishlist')"><span class="btn-icon">🤍</span><span class="btn-label">Wishlist</span><span class="nav-badge" id="wishlist-badge" style="${wc>0?'':'display:none'}">${wc}</span></a>
+      <a class="nav-btn" href="#/cart" onclick="event.preventDefault();navigate('#/cart')"><span class="btn-icon">🛒</span><span class="btn-label">Cart</span><span class="nav-badge" id="cart-badge" style="${cc>0?'':'display:none'}">${cc}</span></a>
+      <a class="nav-btn" href="#/profile" onclick="event.preventDefault();navigate('#/profile')"><span class="btn-icon">👤</span><span class="btn-label">Profile</span></a>
+    </div>
+  </div>
+  <div class="nav-categories"><div class="container">${cats.map(c=>`<a class="nav-cat-item" href="#/products?cat=${c.id}" onclick="event.preventDefault();navigate('#/products?cat=${c.id}')">${c.icon} ${c.name}</a>`).join('')}</div></div>
+  </nav>`;
+}
+
+function renderFooter(){
+  const s = getStoreSettings();
+  const waLink = s.whatsapp.startsWith('http') ? s.whatsapp : `https://wa.me/${s.whatsapp.replace(/\D/g,'')}`;
+  return`<footer class="footer"><div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand"><div class="f-logo">${s.logoIcon} ${s.name}</div><p class="f-desc">${s.description}</p><div class="social-links"><a class="social-btn" href="${s.facebook}" target="_blank" title="Facebook">📘</a><a class="social-btn" href="${s.instagram}" target="_blank" title="Instagram">📸</a><a class="social-btn" href="${waLink}" target="_blank" title="WhatsApp">💬</a><a class="social-btn" href="${s.youtube}" target="_blank" title="YouTube">▶️</a></div></div>
+      <div class="footer-col"><h4>Quick Links</h4><ul><li><a href="#/" onclick="event.preventDefault();navigate('#/')">Home</a></li><li><a href="#/products" onclick="event.preventDefault();navigate('#/products')">All Products</a></li><li><a href="#/offers" onclick="event.preventDefault();navigate('#/offers')">Today's Offers</a></li><li><a href="#/contact" onclick="event.preventDefault();navigate('#/contact')">Contact Us</a></li><li><a href="#/admin" onclick="event.preventDefault();navigate('#/admin')">Admin Panel</a></li></ul></div>
+      <div class="footer-col"><h4>Categories</h4><ul><li><a href="#/products?cat=ncert" onclick="event.preventDefault();navigate('#/products?cat=ncert')">NCERT Books</a></li><li><a href="#/products?cat=stationery" onclick="event.preventDefault();navigate('#/products?cat=stationery')">Stationery</a></li><li><a href="#/products?cat=toys" onclick="event.preventDefault();navigate('#/products?cat=toys')">Toys & Games</a></li><li><a href="#/products?cat=gifts" onclick="event.preventDefault();navigate('#/products?cat=gifts')">Gifts</a></li><li><a href="#/products?cat=flowers" onclick="event.preventDefault();navigate('#/products?cat=flowers')">Flowers</a></li></ul></div>
+      <div class="footer-col"><h4>Contact</h4><ul><li><a href="#/contact" onclick="event.preventDefault();navigate('#/contact')">📍 ${s.address}</a></li><li><a href="tel:${s.phone}">📞 ${s.phone}</a></li><li><a href="mailto:${s.email}">📧 ${s.email}</a></li><li><a href="#/contact" onclick="event.preventDefault();navigate('#/contact')">⏰ ${s.timings}</a></li><li><a href="#">Privacy Policy</a></li></ul></div>
+    </div>
+    <div class="footer-bottom"><span>${s.copyright}</span><div class="footer-badges"><span class="footer-badge">Secure Payments</span><span class="footer-badge">Easy Returns</span><span class="footer-badge">Fast Delivery</span></div></div>
+  </div></footer>`;
+}
+
+// ============================================================
+// PAGES
+// ============================================================
+
+// -- HOME --
+function renderHome(){
+  return`${renderOffersStrip()}${renderHeroBanner()}
+  <div class="container">
+    <section class="section fade-in">
+      ${renderSectionHeader('Shop by Category','🏷️')}
+      <div class="category-grid">${CATEGORIES.map(c=>`<div class="category-card" onclick="navigate('#/products?cat=${c.id}')"><span class="cat-icon">${c.icon}</span><span class="cat-name">${c.name}</span></div>`).join('')}</div>
+    </section>
+    <section class="section">
+      ${renderSectionHeader('🔥 Best Sellers','🔥','#/products?sort=rating')}
+      <div class="products-row">${PRODUCTS.filter(p=>p.rating>=4.8).slice(0,10).map(p=>renderProductCard(p)).join('')}</div>
+    </section>
+    <section class="section">
+      ${renderSectionHeader("Today's Offers",'💥','#/offers')}
+      <div class="products-row">${PRODUCTS.filter(p=>p.discount>=41).slice(0,10).map(p=>renderProductCard(p)).join('')}</div>
+    </section>
+    <div class="mini-banners">
+      <div class="mini-banner" style="background:linear-gradient(135deg,#2874F0,#0052CC)" onclick="navigate('#/products?cat=ncert')"><h3>📚 NCERT Books</h3><p>All Classes Available</p><span class="mb-icon">🎓</span></div>
+      <div class="mini-banner" style="background:linear-gradient(135deg,#EC4899,#BE185D)" onclick="navigate('#/products?cat=gifts')"><h3>🎁 Gift Shop</h3><p>Unique Gifts for Everyone</p><span class="mb-icon">✨</span></div>
+      <div class="mini-banner" style="background:linear-gradient(135deg,#F59E0B,#D97706)" onclick="navigate('#/products?cat=toys')"><h3>🧸 Toys & Games</h3><p>Up to 43% OFF Today</p><span class="mb-icon">🎮</span></div>
+    </div>
+    <section class="section">
+      ${renderSectionHeader('New Arrivals','✨','#/products')}
+      <div class="products-row">${PRODUCTS.slice(60,72).map(p=>renderProductCard(p)).join('')}</div>
+    </section>
+    <section class="section">
+      ${renderSectionHeader('🌸 Premium Flower Collection','🌸','#/products?cat=flowers')}
+      <div class="products-row">${PRODUCTS.filter(p=>p.category==='flowers').map(p=>renderProductCard(p)).join('')}</div>
+    </section>
+    <section class="section">
+      ${renderSectionHeader('Trending Toys & Games','🎮','#/products?cat=toys')}
+      <div class="products-row">${PRODUCTS.filter(p=>['toys','games'].includes(p.category)).slice(0,8).map(p=>renderProductCard(p)).join('')}</div>
+    </section>
+    <section class="section">
+      ${renderSectionHeader('Popular Stationery','✏️','#/products?cat=stationery')}
+      <div class="products-row">${PRODUCTS.filter(p=>['stationery','pens','art'].includes(p.category)).slice(0,8).map(p=>renderProductCard(p)).join('')}</div>
+    </section>
+    <section class="section">
+      ${renderSectionHeader('What Our Customers Say','⭐')}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px">
+        ${TESTIMONIALS.map(t=>`<div class="card hover-lift"><div class="card-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><img src="${t.avatar}" style="width:44px;height:44px;border-radius:50%;object-fit:cover" /><div><div style="font-weight:700;font-size:14px">${t.name}</div><div style="font-size:11px;color:var(--text-muted)">${t.date}</div></div></div><div>${renderStars(t.rating)}</div><p style="font-size:13px;color:var(--text-secondary);margin-top:8px;line-height:1.6">"${t.text}"</p></div></div>`).join('')}
+      </div>
+    </section>
+  </div>`;
+}
+
+function renderHeroBanner(){
+  const slides=BANNERS.map((b,i)=>`<div class="hero-slide${i===0?' active':''}" id="slide-${i}" style="background:${b.gradient}"><div class="hero-content"><div class="hero-text"><span class="hero-badge">${b.badge}</span><h1 class="hero-title">${b.title}</h1><p class="hero-subtitle">${b.subtitle}</p><a class="hero-cta" href="#/products?cat=${b.cat}" onclick="event.preventDefault();navigate('#/products?cat=${b.cat}')">${b.cta} <span class="arrow">→</span></a></div><div class="hero-visual">${b.emoji}</div></div></div>`).join('');
+  const dots=BANNERS.map((_,i)=>`<span class="hero-dot${i===0?' active':''}" onclick="goToSlide(${i})"></span>`).join('');
+  return`<div class="hero-section"><div class="hero-slider" id="hero-slider">${slides}<div class="hero-arrows"><button class="hero-arrow" onclick="heroSlide(-1)">‹</button><button class="hero-arrow" onclick="heroSlide(1)">›</button></div><div class="hero-dots">${dots}</div></div></div>`;
+}
+
+// -- LOGIN --
+function renderLogin(){
+  return`<div class="auth-page"><div class="auth-card">
+    <div class="auth-illustration"><div class="illus-icon">📚</div><h2>Welcome Back!</h2><p>Sign in to access your orders, wishlist and exclusive offers.</p><div class="auth-features"><div class="auth-feature"><span class="check">✓</span>100+ Products</div><div class="auth-feature"><span class="check">✓</span>Easy Returns</div><div class="auth-feature"><span class="check">✓</span>Secure Payments</div><div class="auth-feature"><span class="check">✓</span>Exclusive Offers</div></div></div>
+    <div class="auth-form-panel">
+      <div class="auth-header"><h1>Sign In</h1><p>Enter your credentials to continue</p></div>
+      <div id="login-error" style="display:none;background:#FEE2E2;color:#B91C1C;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px"></div>
+      <div class="form-group"><label class="form-label">Email Address</label><div class="form-input-wrap"><span class="input-icon">📧</span><input type="email" class="form-input" id="login-email" placeholder="your@email.com" /></div></div>
+      <div class="form-group"><label class="form-label">Password</label><div class="form-input-wrap"><span class="input-icon">🔒</span><input type="password" class="form-input" id="login-password" placeholder="Enter password" /><span class="input-eye" onclick="togglePwdFn('login-password',this)">👁</span></div><div class="auth-links"><span></span><button onclick="" style="color:var(--primary);background:none;border:none;font-size:13px;font-weight:600;cursor:pointer">Forgot Password?</button></div></div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="doLogin()">Sign In</button>
+      <div class="auth-divider">OR</div>
+      <button class="btn-google" onclick="Toast.show('Google Sign-in coming soon!','info')"><svg class="g-icon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Continue with Google</button>
+      <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-secondary)">Don't have an account? <a href="#/signup" onclick="event.preventDefault();navigate('#/signup')" style="color:var(--primary);font-weight:600">Create Account</a></p>
+      <p style="text-align:center;margin-top:8px"><button onclick="Auth.continueAsGuest();navigate('#/')" style="color:var(--text-muted);background:none;border:none;font-size:13px;cursor:pointer;text-decoration:underline">Continue as Guest</button></p>
+      <p style="text-align:center;margin-top:6px;font-size:11px;color:var(--text-muted)">Demo: admin@abhishek.com / admin123</p>
+    </div>
+  </div></div>`;
+}
+
+// -- SIGNUP --
+function renderSignup(){
+  return`<div class="auth-page"><div class="auth-card">
+    <div class="auth-illustration"><div class="illus-icon">🎉</div><h2>Join Us Today!</h2><p>Create your account and enjoy exclusive member benefits.</p><div class="auth-features"><div class="auth-feature"><span class="check">✓</span>Track Your Orders</div><div class="auth-feature"><span class="check">✓</span>Save Your Wishlist</div><div class="auth-feature"><span class="check">✓</span>Member-Only Offers</div><div class="auth-feature"><span class="check">✓</span>Faster Checkout</div></div></div>
+    <div class="auth-form-panel" style="overflow-y:auto">
+      <div class="auth-header"><h1>Create Account</h1><p>Fill in your details to get started</p></div>
+      <div id="signup-error" style="display:none;background:#FEE2E2;color:#B91C1C;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group"><label class="form-label">Full Name *</label><div class="form-input-wrap"><span class="input-icon">👤</span><input type="text" class="form-input" id="signup-name" placeholder="Your Name" /></div></div>
+        <div class="form-group"><label class="form-label">Mobile *</label><div class="form-input-wrap"><span class="input-icon">📱</span><input type="tel" class="form-input" id="signup-mobile" placeholder="10-digit mobile" maxlength="10" /></div></div>
+      </div>
+      <div class="form-group"><label class="form-label">Email Address *</label><div class="form-input-wrap"><span class="input-icon">📧</span><input type="email" class="form-input" id="signup-email" placeholder="your@email.com" /></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group"><label class="form-label">Password *</label><div class="form-input-wrap"><span class="input-icon">🔒</span><input type="password" class="form-input" id="signup-password" placeholder="Min. 6 characters" /><span class="input-eye" onclick="togglePwdFn('signup-password',this)">👁</span></div></div>
+        <div class="form-group"><label class="form-label">Confirm Password *</label><div class="form-input-wrap"><span class="input-icon">🔒</span><input type="password" class="form-input" id="signup-confirm" placeholder="Repeat password" /></div></div>
+      </div>
+      <div class="form-group"><label class="form-label">Address</label><div class="form-input-wrap"><span class="input-icon">📍</span><input type="text" class="form-input" id="signup-address" placeholder="Your full address" /></div></div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="doSignup()">Create Account</button>
+      <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-secondary)">Already have an account? <a href="#/login" onclick="event.preventDefault();navigate('#/login')" style="color:var(--primary);font-weight:600">Sign In</a></p>
+    </div>
+  </div></div>`;
+}
+
+// -- PRODUCTS --
+let productFilters={category:'all',sort:'default',search:'',maxPrice:2500,rating:0,page:1};
+let currentView='grid';
+let appliedCoupon=null;
+
+function renderProducts(){
+  const {category,sort,search,maxPrice,rating,page}=productFilters;
+  const PER_PAGE=20;
+  let products=[...PRODUCTS];
+  if(category&&category!=='all')products=products.filter(p=>p.category===category);
+  if(search)products=Search.query(search,products);
+  if(maxPrice<2500)products=products.filter(p=>p.price<=maxPrice);
+  if(rating>0)products=products.filter(p=>p.rating>=rating);
+  if(sort==='price_asc')products.sort((a,b)=>a.price-b.price);
+  if(sort==='price_desc')products.sort((a,b)=>b.price-a.price);
+  if(sort==='rating')products.sort((a,b)=>b.rating-a.rating);
+  if(sort==='discount')products.sort((a,b)=>b.discount-a.discount);
+  if(sort==='new')products=products.slice().reverse();
+  const total=products.length;
+  const pages=Math.ceil(total/PER_PAGE);
+  const paginated=products.slice((page-1)*PER_PAGE,page*PER_PAGE);
+  const catLabel=category&&category!=='all'?CATEGORIES.find(c=>c.id===category)?.name||category:'All Products';
+  const pagination=pages>1?`<div style="display:flex;justify-content:center;gap:8px;margin-top:32px;flex-wrap:wrap">${Array.from({length:pages},(_,i)=>`<button class="btn ${i+1===page?'btn-primary':'btn-outline'} btn-sm" onclick="goToPage(${i+1})">${i+1}</button>`).join('')}</div>`:'';
+  return`<div class="container"><div class="products-page">
+    <aside class="filter-sidebar">
+      <h3>🔧 Filters <button class="filter-clear" onclick="clearFilters()">Clear All</button></h3>
+      <div class="filter-group"><h4>Category</h4>${CATEGORIES.map(c=>`<div class="filter-option"><input type="checkbox" id="cat-${c.id}"${category===c.id?' checked':''} onchange="filterByCategory('${c.id}',this.checked)"/><label for="cat-${c.id}">${c.icon} ${c.name}</label></div>`).join('')}</div>
+      <div class="filter-group"><h4>Price Range</h4><div class="price-range"><input type="range" min="0" max="2500" value="${maxPrice}" step="50" oninput="updatePriceFilter(this.value)"/><div class="price-labels"><span>₹0</span><span id="price-label">₹${maxPrice}</span></div></div></div>
+      <div class="filter-group"><h4>Minimum Rating</h4>${[4.5,4.0,3.5].map(r=>`<div class="filter-option"><input type="radio" name="rating" value="${r}"${rating===r?' checked':''} onchange="filterByRating(${r})"/><label>${renderStars(r)} & above</label></div>`).join('')}<div class="filter-option"><input type="radio" name="rating" value="0"${!rating?' checked':''} onchange="filterByRating(0)"/><label>All Ratings</label></div></div>
+    </aside>
+    <main class="products-main">
+      <div class="products-toolbar">
+        <span class="products-count"><strong>${total}</strong> products in ${catLabel}${search?' for "'+search+'"':''}</span>
+        <div style="display:flex;align-items:center;gap:12px">
+          <select class="sort-select" onchange="sortProductsFn(this.value)">
+            <option value="default"${sort==='default'?' selected':''}>Relevance</option>
+            <option value="rating"${sort==='rating'?' selected':''}>Top Rated</option>
+            <option value="price_asc"${sort==='price_asc'?' selected':''}>Price: Low to High</option>
+            <option value="price_desc"${sort==='price_desc'?' selected':''}>Price: High to Low</option>
+            <option value="discount"${sort==='discount'?' selected':''}>Biggest Discount</option>
+            <option value="new"${sort==='new'?' selected':''}>Newest First</option>
+          </select>
+          <div class="view-toggle"><button class="view-btn${currentView==='grid'?' active':''}" onclick="setViewFn('grid')" title="Grid">▦</button><button class="view-btn${currentView==='list'?' active':''}" onclick="setViewFn('list')" title="List">☰</button></div>
+        </div>
+      </div>
+      <div class="${currentView==='list'?'products-list':'products-grid'}" id="products-grid">
+        ${paginated.length>0?paginated.map(p=>currentView==='list'?renderProductCardList(p):renderProductCard(p)).join(''):`<div style="grid-column:1/-1" class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No Products Found</div><div class="empty-sub">Try adjusting filters</div><button class="btn btn-primary" onclick="clearFilters()">Clear Filters</button></div>`}
+      </div>
+      <div id="products-pagination">${pagination}</div>
+    </main>
+  </div></div>`;
+}
+
+// -- PRODUCT DETAIL --
+function renderProductDetail(id){
+  const product=PRODUCTS.find(p=>p.id===parseInt(id));
+  if(!product)return`<div class="container"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Product Not Found</div><button class="btn btn-primary" onclick="navigate('#/products')">Browse All</button></div></div>`;
+  RecentlyViewed.add(product);
+  const related=PRODUCTS.filter(p=>p.category===product.category&&p.id!==product.id).slice(0,6);
+  const inCart=Cart.has(product.id),inWish=Wishlist.has(product.id);
+  const thumbs=[product.image,...Array.from({length:3},(_,i)=>`https://picsum.photos/seed/${product.id}t${i}/400/400`)];
+  const adminBox = isAdminUser() ? `<div class="admin-detail-box">
+    <div class="admin-detail-title">👑 Shopkeeper Quick Edit (Admin Controls)</div>
+    <div class="admin-detail-actions">
+      <button class="btn btn-primary btn-sm" onclick="openEditProductModal(${product.id})">✏️ Edit Details & Price</button>
+      <button class="btn btn-outline btn-sm" onclick="openEditProductModal(${product.id},'image')">🖼️ Change Image</button>
+      <button class="btn btn-outline btn-sm" onclick="openEditProductModal(${product.id},'price')">💰 Edit Price & Discount</button>
+      <button class="btn btn-danger btn-sm" onclick="delProduct(${product.id})">🗑️ Delete Product</button>
+    </div>
+  </div>` : '';
+  return`<div class="container">
+    <nav class="breadcrumb"><a href="#/" onclick="event.preventDefault();navigate('#/')">Home</a> / <a href="#/products?cat=${product.category}" onclick="event.preventDefault();navigate('#/products?cat=${product.category}')">${CATEGORIES.find(c=>c.id===product.category)?.name||product.category}</a> / <span>${product.name.substring(0,35)}…</span></nav>
+    ${adminBox}
+    <div class="product-detail-grid">
+      <div class="product-gallery">
+        <div class="gallery-main"><img src="${product.image}" alt="${product.name}" id="gallery-main-img" /></div>
+        <div class="gallery-thumbs">${thumbs.map((src,i)=>`<div class="gallery-thumb${i===0?' active':''}" onclick="changeImg('${src}',this)"><img src="${src}" alt="thumb ${i+1}" /></div>`).join('')}</div>
+      </div>
+      <div class="product-detail-info slide-up">
+        <div class="detail-title">${product.name}</div>
+        <div class="detail-rating"><span class="rating-pill">⭐ ${product.rating}</span><span style="font-size:13px;color:var(--text-secondary)">${fmt.number(product.reviews)} ratings</span><span class="badge badge-success">Bestseller</span></div>
+        <div class="detail-price"><span class="current">${fmt.price(product.price)}</span><span class="mrp">${fmt.price(product.mrp)}</span><span class="off">${product.discount}% off</span><br/><span class="offer-tag">🏷️ Use code BACK2SCHOOL for extra 20% off</span></div>
+        <div class="detail-availability"><span class="dot${product.stock>0?' dot-green':' dot-red'}"></span><span style="font-weight:600">${product.stock>0?'In Stock':'Out of Stock'}</span>${product.stock>0&&product.stock<5?`<span class="badge badge-warning">Only ${product.stock} left!</span>`:''}</div>
+        <div class="quantity-selector"><label>Qty:</label><button class="qty-btn" onclick="changeQtyFn(-1)">−</button><input class="qty-input" type="number" value="1" min="1" max="10" id="qty-input" readonly /><button class="qty-btn" onclick="changeQtyFn(1)">+</button></div>
+        <div class="detail-action-btns">
+          <button class="btn btn-primary${inCart?' added':''}" id="detail-cart-btn" onclick="addToCartFromDetail(${product.id})"${product.stock===0?' disabled':''}>${inCart?'✓ Go to Cart':'🛒 Add to Cart'}</button>
+          <button class="btn btn-secondary" onclick="buyNowFn(${product.id})">⚡ Buy Now</button>
+          <button class="btn${inWish?' btn-danger':' btn-outline'}" id="detail-wish-btn" onclick="doToggleWishlist(${product.id})">${inWish?'❤️':'🤍'}</button>
+        </div>
+        <div class="delivery-info">
+          <div class="delivery-row"><span class="d-icon">🚚</span><div class="d-text"><strong>Free Delivery</strong>On orders above ₹499</div></div>
+          <div class="delivery-row"><span class="d-icon">🔄</span><div class="d-text"><strong>Easy Returns</strong>7-day hassle-free return policy</div></div>
+          <div class="delivery-row"><span class="d-icon">🔒</span><div class="d-text"><strong>Secure Payment</strong>100% secure payment</div></div>
+          <div class="delivery-row"><span class="d-icon">🏪</span><div class="d-text"><strong>Store Pickup</strong>Pick up in 2 hours from our store</div></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px"><button class="btn btn-ghost btn-sm" onclick="Toast.show('Product link copied! 📤','success')">📤 Share</button></div>
+      </div>
+    </div>
+    <div class="detail-tabs" style="margin-top:40px">
+      <div class="tab-header"><button class="tab-btn active" onclick="switchTabFn('description',this)">Description</button><button class="tab-btn" onclick="switchTabFn('specifications',this)">Specifications</button><button class="tab-btn" onclick="switchTabFn('reviews',this)">Reviews (${fmt.number(product.reviews)})</button></div>
+      <div id="tab-description" class="tab-content"><p>${product.description}</p></div>
+      <div id="tab-specifications" class="tab-content" style="display:none"><table class="spec-table">${specs.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table></div>
+      <div id="tab-reviews" class="tab-content" style="display:none">${TESTIMONIALS.map(t=>`<div style="border-bottom:1px solid var(--border);padding:14px 0"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><img src="${t.avatar}" style="width:36px;height:36px;border-radius:50%;object-fit:cover"/><strong style="font-size:14px">${t.name}</strong><span class="rating-pill" style="padding:2px 8px;font-size:12px">⭐ ${t.rating}</span><span style="font-size:11px;color:var(--text-muted);margin-left:auto">${t.date}</span></div><p style="font-size:13px;color:var(--text-secondary)">${t.text}</p></div>`).join('')}</div>
+    </div>
+    ${related.length>0?`<section class="section">${renderSectionHeader('Related Products','🔗')}<div class="products-row">${related.map(p=>renderProductCard(p)).join('')}</div></section>`:''}
+    ${renderRecentlyViewedSection()}
+  </div>`;
+}
+
+function renderRecentlyViewedSection(){
+  const items=RecentlyViewed.get().filter(p=>p);
+  if(items.length<2)return'';
+  return`<section class="section">${renderSectionHeader('Recently Viewed','🕐')}<div class="products-row">${items.map(p=>renderProductCard(p)).join('')}</div></section>`;
+}
+
+// -- CART --
+function renderCart(){
+  const{items}=CartState.get();
+  if(!items.length)return`<div class="container"><div class="empty-state"><div class="empty-icon">🛒</div><div class="empty-title">Your Cart is Empty</div><div class="empty-sub">Start shopping!</div><button class="btn btn-primary btn-lg" onclick="navigate('#/products')">🛍️ Start Shopping</button></div></div>`;
+  const subtotal=Cart.getTotal(),mrpTotal=Cart.getMrpTotal(),saved=mrpTotal-subtotal,shipping=subtotal>=499?0:49,gst=Math.round(subtotal*0.05),total=subtotal+shipping+gst;
+  return`<div class="container">
+    <div style="padding:16px 0 8px"><h1 style="font-family:var(--font-display);font-size:22px;font-weight:800">🛒 My Cart <span style="font-size:14px;font-weight:400;color:var(--text-secondary)">(${Cart.getCount()} items)</span></h1></div>
+    <div class="cart-page">
+      <div class="cart-items">${items.map(item=>`<div class="cart-item" id="cart-item-${item.id}"><img class="cart-item-img" src="${item.image}" alt="${item.name}" onclick="navigate('#/product/${item.id}')" style="cursor:pointer"/><div class="cart-item-info"><div class="cart-item-name">${item.name}</div><div class="cart-item-brand">By ${item.brand}</div><div><span class="cart-item-price">${fmt.price(item.price)}</span><span class="cart-item-mrp">${fmt.price(item.mrp)}</span><span class="cart-item-save">Save ${fmt.price(item.mrp-item.price)} (${item.discount}% off)</span></div><div class="cart-item-actions"><div class="cart-qty"><button class="qty-btn" onclick="updateQty(${item.id},${item.qty-1})">−</button><input class="qty-input" value="${item.qty}" readonly style="width:44px;height:34px"/><button class="qty-btn" onclick="updateQty(${item.id},${item.qty+1})">+</button></div><button class="cart-remove" onclick="removeItem(${item.id})">🗑 Remove</button><button class="btn btn-ghost btn-sm" onclick="moveToWish(${item.id})">🤍 Save</button></div></div></div>`).join('')}</div>
+      <div class="cart-summary">
+        <h3>Price Details</h3>
+        <div class="coupon-box"><label class="form-label" style="font-size:12px;color:var(--text-muted)">Have a coupon?</label><div class="coupon-input-row"><input type="text" id="coupon-input" placeholder="Coupon code"/><button class="btn btn-outline btn-sm" onclick="applyCouponFn()">Apply</button></div><div id="coupon-msg" style="font-size:12px;margin-top:6px"></div></div>
+        <div class="summary-row"><span>Subtotal (${Cart.getCount()} items)</span><span>${fmt.price(subtotal)}</span></div>
+        <div class="summary-row"><span>MRP Total</span><span style="text-decoration:line-through;color:var(--text-muted)">${fmt.price(mrpTotal)}</span></div>
+        <div class="summary-row"><span style="color:var(--success)">Discount</span><span style="color:var(--success)">−${fmt.price(saved)}</span></div>
+        <div id="coupon-discount-row" class="summary-row" style="display:none"><span style="color:var(--success)">Coupon</span><span id="coupon-discount-val" style="color:var(--success)"></span></div>
+        <div class="summary-row"><span>Delivery</span><span style="color:${shipping===0?'var(--success)':'var(--text)'}">${shipping===0?'FREE':fmt.price(shipping)}</span></div>
+        <div class="summary-row"><span>GST (5%)</span><span>${fmt.price(gst)}</span></div>
+        <div class="summary-total"><span>Total</span><span id="cart-total-display">${fmt.price(total)}</span></div>
+        <div class="summary-save">🎉 You're saving ${fmt.price(saved)}!</div>
+        <button class="btn btn-primary btn-full btn-lg" onclick="navigate('#/checkout')">Proceed to Checkout →</button>
+        <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:10px">🔒 Secure checkout • 7-day easy return</p>
+        <div style="margin-top:12px"><p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Available Coupons:</p>${OFFERS.slice(0,3).map(o=>`<div style="font-size:11px;background:var(--bg);padding:6px 10px;border-radius:6px;margin-bottom:4px;cursor:pointer" onclick="document.getElementById('coupon-input').value='${o.code}'"><strong>${o.code}</strong> — ${o.desc}</div>`).join('')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// -- CHECKOUT --
+function renderCheckout(){
+  const{items}=CartState.get();
+  if(!items.length){navigate('#/cart');return'';}
+  const user=AuthState.get().user;
+  const subtotal=Cart.getTotal(),shipping=subtotal>=499?0:49,gst=Math.round(subtotal*0.05),total=subtotal+shipping+gst;
+  return`<div class="container">
+    <div style="padding:16px 0 8px"><h1 style="font-family:var(--font-display);font-size:22px;font-weight:800">Checkout</h1></div>
+    <div class="checkout-page">
+      <div>
+        <div class="checkout-section"><div class="checkout-section-header"><span class="step-num">1</span><h3>Delivery Address</h3></div><div class="checkout-section-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">Full Name *</label><input class="form-input" id="co-name" value="${user?.name||''}" placeholder="Full Name"/></div><div class="form-group"><label class="form-label">Mobile *</label><input class="form-input" id="co-mobile" value="${user?.mobile||''}" placeholder="10-digit Mobile"/></div></div>
+          <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="co-email" value="${user?.email||''}" placeholder="email@example.com"/></div>
+          <div class="form-group"><label class="form-label">Address *</label><input class="form-input" id="co-address" value="${user?.address||''}" placeholder="House No, Street, Area"/></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">City</label><input class="form-input" id="co-city" placeholder="City"/></div><div class="form-group"><label class="form-label">State</label><input class="form-input" id="co-state" placeholder="State"/></div><div class="form-group"><label class="form-label">Pincode</label><input class="form-input" id="co-pincode" placeholder="6-digit PIN" maxlength="6"/></div></div>
+        </div></div>
+        <div class="checkout-section"><div class="checkout-section-header"><span class="step-num">2</span><h3>Payment Method</h3></div><div class="checkout-section-body">
+          <div class="payment-options">${[{id:'cod',icon:'💵',name:'Cash on Delivery',desc:'Pay when your order arrives'},{id:'upi',icon:'📱',name:'UPI',desc:'Google Pay, PhonePe, Paytm'},{id:'card',icon:'💳',name:'Credit / Debit Card',desc:'All major cards accepted'},{id:'nb',icon:'🏦',name:'Net Banking',desc:'All major banks supported'}].map((p,i)=>`<label class="payment-option${i===0?' selected':''}" onclick="selectPaymentFn(this)"><input type="radio" name="payment" value="${p.id}"${i===0?' checked':''}/><span class="p-icon">${p.icon}</span><div class="p-info"><div class="p-name">${p.name}</div><div class="p-desc">${p.desc}</div></div></label>`).join('')}</div>
+        </div></div>
+      </div>
+      <div><div class="cart-summary" style="position:sticky;top:80px">
+        <h3>Order Summary</h3>
+        <div style="max-height:200px;overflow-y:auto;margin-bottom:12px">${items.map(item=>`<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)"><img src="${item.image}" style="width:40px;height:40px;border-radius:6px;object-fit:cover"/><div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name}</div><div style="font-size:11px;color:var(--text-muted)">Qty: ${item.qty}</div></div><div style="font-size:13px;font-weight:700">${fmt.price(item.price*item.qty)}</div></div>`).join('')}</div>
+        <div class="summary-row"><span>Subtotal</span><span>${fmt.price(subtotal)}</span></div>
+        <div class="summary-row"><span>Delivery</span><span style="color:${shipping===0?'var(--success)':'var(--text)'}">${shipping===0?'FREE':fmt.price(shipping)}</span></div>
+        <div class="summary-row"><span>GST (5%)</span><span>${fmt.price(gst)}</span></div>
+        <div class="summary-total"><span>Total</span><span>${fmt.price(total)}</span></div>
+        <button class="btn btn-primary btn-full btn-lg" style="margin-top:12px" onclick="placeOrderFn()">🎉 Place Order — ${fmt.price(total)}</button>
+        <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:8px">🔒 Your data is safe & encrypted</p>
+      </div></div>
+    </div>
+  </div>`;
+}
+
+// -- ORDER SUCCESS --
+function renderOrderSuccess(orderId){
+  const orders=Orders.getAll();
+  const order=orders.find(o=>o.id===orderId)||orders[0];
+  return`<div class="order-success"><div class="success-card fade-in">
+    <div class="success-animation">🎉</div>
+    <div class="success-title">Order Placed Successfully!</div>
+    <p class="success-msg">Thank you for shopping with <strong>Abhishek Book Depot</strong>!<br/>Your order will be delivered by <strong>${order?.estimatedDelivery||'within 3-5 days'}</strong>.</p>
+    <div class="order-number"><span class="confetti-icon">✨</span> Order ID: <strong>${order?.id||orderId}</strong></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+      <button class="btn btn-primary btn-lg" onclick="navigate('#/profile')">Track Order</button>
+      <button class="btn btn-outline btn-lg" onclick="navigate('#/')">Continue Shopping</button>
+    </div>
+    <div style="margin-top:24px;padding:16px;background:var(--bg);border-radius:12px;font-size:13px;color:var(--text-secondary)">📧 Order confirmation sent to your email<br/>📦 Expected delivery: ${order?.estimatedDelivery||'within 3-5 days'}<br/>📍 From: Abhishek Book Depot, Main Market</div>
+  </div></div>`;
+}
+
+// -- PROFILE --
+function renderProfile(){
+  const{user,isLoggedIn,isGuest}=AuthState.get();
+  if(!isLoggedIn&&!isGuest)return`<div class="container"><div class="empty-state"><div class="empty-icon">👤</div><div class="empty-title">Please Sign In</div><div class="empty-sub">Sign in to view your profile and orders</div><button class="btn btn-primary btn-lg" onclick="navigate('#/login')">Sign In</button></div></div>`;
+  const orders=Orders.getAll();
+  const initials=user?user.name?.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2):'G';
+  return`<div class="container"><div class="profile-page">
+    <div class="profile-sidebar">
+      <div class="profile-avatar-card"><div class="avatar-circle">${initials}</div><div class="profile-name">${user?.name||'Guest User'}</div><div class="profile-email">${user?.email||'Not signed in'}</div>${user?.mobile?`<div style="font-size:12px;color:var(--text-muted);margin-top:4px">📱 ${user.mobile}</div>`:''}</div>
+      <nav class="profile-nav">
+        <div class="profile-nav-item active" onclick="showProfileTabFn('orders',this)"><span class="nav-icon">📦</span>My Orders</div>
+        <div class="profile-nav-item" onclick="showProfileTabFn('wishlist',this)"><span class="nav-icon">🤍</span>Wishlist</div>
+        <div class="profile-nav-item" onclick="showProfileTabFn('addresses',this)"><span class="nav-icon">📍</span>Addresses</div>
+        <div class="profile-nav-item" onclick="showProfileTabFn('settings',this)"><span class="nav-icon">⚙️</span>Settings</div>
+        <div class="profile-nav-item" onclick="doLogout()" style="color:var(--danger)"><span class="nav-icon">🚪</span>Logout</div>
+      </nav>
+    </div>
+    <div class="profile-content" id="profile-content">${renderOrdersTab(orders)}</div>
+  </div></div>`;
+}
+
+function renderOrdersTab(orders){
+  if(!orders||!orders.length)return`<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-title">No Orders Yet</div><div class="empty-sub">Start shopping!</div><button class="btn btn-primary" onclick="navigate('#/products')">Shop Now</button></div>`;
+  return`<h3 style="font-size:18px;font-weight:700;margin-bottom:16px">My Orders (${orders.length})</h3>${orders.map(o=>`<div class="card hover-lift" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px"><div><div style="font-weight:700;font-size:15px">Order #${o.id}</div><div style="font-size:12px;color:var(--text-muted)">${fmt.date(o.placedAt)}</div></div><span class="badge badge-success">${o.status?.toUpperCase()}</span></div><div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">${o.items?.length||0} items • Total: <strong>${fmt.price(o.total||0)}</strong></div><div style="font-size:13px;color:var(--text-muted)">📦 Estimated Delivery: ${o.estimatedDelivery}</div><div style="display:flex;gap:10px;margin-top:12px"><button class="btn btn-outline btn-sm">Track Order</button><button class="btn btn-ghost btn-sm">Download Invoice</button></div></div></div>`).join('')}`;
+}
+
+// -- WISHLIST --
+function renderWishlist(){
+  const{items}=WishlistState.get();
+  if(!items.length)return`<div class="container"><div class="empty-state"><div class="empty-icon">🤍</div><div class="empty-title">Your Wishlist is Empty</div><div class="empty-sub">Save items by clicking ❤️</div><button class="btn btn-primary btn-lg" onclick="navigate('#/products')">Browse Products</button></div></div>`;
+  return`<div class="container">${renderSectionHeader(`My Wishlist (${items.length})`,'❤️')}<div class="products-grid" style="margin-top:16px">${items.map(p=>renderProductCard(p)).join('')}</div></div>`;
+}
+
+// -- SEARCH --
+function renderSearch(query){
+  const results=Search.query(query,PRODUCTS);
+  return`<div class="container"><div class="search-page"><div class="search-query-display">Showing <strong>${results.length}</strong> results for <strong>"${query}"</strong></div>${results.length>0?`<div class="products-grid">${results.map(p=>renderProductCard(p)).join('')}</div>`:`<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No results found</div></div>`}</div></div>`;
+}
+
+// -- OFFERS --
+function renderOffers(){
+  return`<div class="container"><div class="offers-page">
+    <div class="offers-header"><h1>🔥 Today's Best Offers</h1><p>Exclusive deals and coupons — save big every day!</p></div>
+    <div class="coupons-grid">${OFFERS.map(o=>`<div class="coupon-card"><div class="coupon-icon">${o.id===2?'📚':o.id===5?'🎁':'🏷️'}</div><div><div class="coupon-code">${o.code}</div><div class="coupon-desc">${o.desc}</div><div class="coupon-min">Min. order: ${o.minOrder>0?fmt.price(o.minOrder):'No minimum'}</div></div><button class="btn btn-outline btn-sm copy-btn" onclick="copyCoupon('${o.code}')">Copy</button></div>`).join('')}</div>
+    <section class="section">${renderSectionHeader('Biggest Discounts 💥','💥')}<div class="products-grid">${PRODUCTS.filter(p=>p.discount>=41).slice(0,12).map(p=>renderProductCard(p)).join('')}</div></section>
+  </div></div>`;
+}
+
+// -- CONTACT --
+function renderContact(){
+  return`<div class="container"><div class="contact-page">
+    <div style="text-align:center;padding:32px 0 24px"><h1 style="font-family:var(--font-display);font-size:30px;font-weight:900">Get In Touch 📍</h1><p style="color:var(--text-secondary);font-size:15px;margin-top:8px">We're always here to help you find what you need</p></div>
+    <div class="contact-grid">
+      <div>
+        <div class="contact-card"><div class="c-icon">📍</div><div><h4>Store Location</h4><p>Main Market, Sector 12<br/>Near Government School<br/>Your City — 110001</p></div></div>
+        <div class="contact-card"><div class="c-icon">📞</div><div><h4>Phone Numbers</h4><p>+91 98765 43210 (Main Store)<br/>+91 87654 32109 (WhatsApp)<br/>Monday–Saturday: 9AM–8PM</p></div></div>
+        <div class="contact-card"><div class="c-icon">📧</div><div><h4>Email</h4><p>info@abhishekbooks.com<br/>We reply within 24 hours</p></div></div>
+        <div class="map-placeholder"><div class="map-icon">🗺️</div><div style="font-weight:600">Abhishek Book Depot</div><div style="font-size:13px">Main Market, Sector 12</div><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="Toast.show('Opening Maps…','info')">Open in Google Maps</button></div>
+      </div>
+      <div>
+        <div class="card"><div class="card-header"><h3 style="font-size:16px;font-weight:700">Send Us a Message</h3></div><div class="card-body">
+          <div class="form-group"><label class="form-label">Your Name</label><input class="form-input" placeholder="Full Name"/></div>
+          <div class="form-group"><label class="form-label">Mobile / Email</label><input class="form-input" placeholder="Contact info"/></div>
+          <div class="form-group"><label class="form-label">Subject</label><select class="form-input form-select"><option>General Enquiry</option><option>Book Availability</option><option>Order Issue</option><option>Bulk / Wholesale Order</option><option>Return / Refund</option></select></div>
+          <div class="form-group"><label class="form-label">Message</label><textarea class="form-input" rows="4" placeholder="Your message…" style="resize:vertical"></textarea></div>
+          <button class="btn btn-primary btn-full" onclick="Toast.show('Message sent! We will reply soon. 📩','success')">Send Message 📩</button>
+        </div></div>
+        <div class="business-hours" style="margin-top:16px"><h4 style="font-size:14px;font-weight:700;margin-bottom:12px">⏰ Business Hours</h4>${[['Monday – Saturday','9:00 AM – 8:00 PM'],['Sunday','10:00 AM – 6:00 PM'],['Public Holidays','10:00 AM – 4:00 PM']].map(([d,t])=>`<div class="hours-row"><span>${d}</span><span style="font-weight:600;color:var(--primary)">${t}</span></div>`).join('')}</div>
+      </div>
+    </div>
+  </div></div>`;
+}
+
+// -- ADMIN --
+function renderAdmin(sub='dashboard'){
+  const s = getStoreSettings();
+  const navItems=[{id:'dashboard',icon:'📊',label:'Dashboard'},{id:'products',icon:'📦',label:'Products',badge:PRODUCTS.length},{id:'orders',icon:'🛍️',label:'Orders',badge:ADMIN_STATS.pendingOrders},{id:'customers',icon:'👥',label:'Customers'},{id:'inventory',icon:'📋',label:'Inventory'},{id:'offers',icon:'🏷️',label:'Offers'},{id:'settings',icon:'⚙️',label:'Settings'}];
+  const sidebar=navItems.map(n=>`<a class="admin-nav-item${sub===n.id?' active':''}" href="#/admin/${n.id}" onclick="event.preventDefault();navigate('#/admin/${n.id}')"><span class="a-icon">${n.icon}</span><span>${n.label}</span>${n.badge?`<span class="a-badge">${n.badge}</span>`:''}</a>`).join('');
+  let content='';
+  if(sub==='dashboard')content=renderAdminDashboard();
+  else if(sub==='products')content=renderAdminProducts();
+  else if(sub==='orders')content=renderAdminOrders();
+  else if(sub==='customers')content=renderAdminCustomers();
+  else if(sub==='inventory')content=renderAdminInventory();
+  else if(sub==='settings')content=renderAdminSettings();
+  else content=`<div class="card"><div class="card-body"><h3>${navItems.find(n=>n.id===sub)?.label||sub}</h3><p style="color:var(--text-secondary);margin-top:8px">Coming soon…</p></div></div>`;
+  const dark=ThemeState.get().dark;
+  return`<div class="admin-layout">
+    <aside class="admin-sidebar"><div class="admin-sidebar-logo"><div class="logo">${s.logoIcon} ABD Admin</div><div class="logo-sub">${s.name}</div></div><nav class="admin-nav"><div class="admin-nav-label">Main Menu</div>${sidebar}</nav><div style="padding:16px;border-top:1px solid #1E293B"><button class="admin-nav-item" onclick="navigate('#/')" style="width:100%;text-decoration:none"><span class="a-icon">🏠</span><span>View Store</span></button></div></aside>
+    <main class="admin-content">
+      <div class="admin-topbar"><h1>${navItems.find(n=>n.id===sub)?.label||'Admin Panel'}</h1><div class="topbar-right"><button class="btn btn-outline btn-sm" onclick="toggleThemeFn()">🌙 Theme</button><div style="width:36px;height:36px;background:var(--primary);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">A</div></div></div>
+      ${content}
+    </main>
+  </div>`;
+}
+
+function renderAdminSettings() {
+  const s = getStoreSettings();
+  return `
+    <div class="card" style="margin-bottom:24px">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <h3 style="font-size:16px;font-weight:700">⚙️ Store Info & Footer Settings</h3>
+        <button class="btn btn-primary btn-sm" onclick="saveStoreSettings()">💾 Save Store Settings</button>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">Customize your store name, logo icon, footer description, contact numbers, address, and social links. Changes will immediately update live across your store!</p>
+
+        <h4 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--primary)">🎨 Store Identity & Header/Footer Branding</h4>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px">
+          <div class="form-group">
+            <label class="form-label">Store Name *</label>
+            <input class="form-input" id="st-name" value="${s.name.replace(/"/g, '&quot;')}" placeholder="e.g. ABHISHEK STATIONERY & ART GALLERY" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Logo Emoji / Icon</label>
+            <input class="form-input" id="st-icon" value="${s.logoIcon}" placeholder="🎨" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Store Description / Tagline (Appears in Footer & About Us)</label>
+          <textarea class="form-input" id="st-description" rows="3" placeholder="Describe your store...">${s.description}</textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Footer Copyright Notice</label>
+          <input class="form-input" id="st-copyright" value="${s.copyright.replace(/"/g, '&quot;')}" placeholder="© 2025 Store Name..." />
+        </div>
+
+        <h4 style="font-size:14px;font-weight:700;margin-top:24px;margin-bottom:12px;color:var(--primary)">📞 Store Contact Information</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="form-group">
+            <label class="form-label">Phone Number(s)</label>
+            <input class="form-input" id="st-phone" value="${s.phone}" placeholder="+91 98765 43210" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Support Email Address</label>
+            <input class="form-input" id="st-email" value="${s.email}" placeholder="info@abhishekstationery.com" />
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="form-group">
+            <label class="form-label">Physical Store Address</label>
+            <input class="form-input" id="st-address" value="${s.address}" placeholder="Main Market, Sector 12" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Opening Hours / Timings</label>
+            <input class="form-input" id="st-timings" value="${s.timings}" placeholder="Mon - Sat: 9 AM - 8 PM" />
+          </div>
+        </div>
+
+        <h4 style="font-size:14px;font-weight:700;margin-top:24px;margin-bottom:12px;color:var(--primary)">🌐 Social Media Links</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="form-group">
+            <label class="form-label">📘 Facebook Page URL</label>
+            <input class="form-input" id="st-facebook" value="${s.facebook}" placeholder="https://facebook.com/..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">📸 Instagram Profile URL</label>
+            <input class="form-input" id="st-instagram" value="${s.instagram}" placeholder="https://instagram.com/..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">💬 WhatsApp Number or Link</label>
+            <input class="form-input" id="st-whatsapp" value="${s.whatsapp}" placeholder="+919876543210" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">▶️ YouTube Channel URL</label>
+            <input class="form-input" id="st-youtube" value="${s.youtube}" placeholder="https://youtube.com/..." />
+          </div>
+        </div>
+
+        <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div>
+            <h4 style="font-size:14px;font-weight:700">🔑 Security & Admin Lock PIN</h4>
+            <p style="font-size:12px;color:var(--text-muted)">Change your secret store owner lock PIN anytime</p>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="openChangeAdminPinModal()">🔑 Change Security PIN</button>
+        </div>
+
+        <div style="margin-top:24px">
+          <button class="btn btn-primary btn-lg" style="width:100%" onclick="saveStoreSettings()">💾 Save All Store Settings</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function saveStoreSettings() {
+  const newSettings = {
+    name: document.getElementById('st-name')?.value?.trim() || "ABHISHEK STATIONERY & ART GALLERY",
+    logoIcon: document.getElementById('st-icon')?.value?.trim() || "🎨",
+    description: document.getElementById('st-description')?.value?.trim() || "",
+    copyright: document.getElementById('st-copyright')?.value?.trim() || "",
+    phone: document.getElementById('st-phone')?.value?.trim() || "",
+    email: document.getElementById('st-email')?.value?.trim() || "",
+    address: document.getElementById('st-address')?.value?.trim() || "",
+    timings: document.getElementById('st-timings')?.value?.trim() || "",
+    facebook: document.getElementById('st-facebook')?.value?.trim() || "#",
+    instagram: document.getElementById('st-instagram')?.value?.trim() || "#",
+    whatsapp: document.getElementById('st-whatsapp')?.value?.trim() || "#",
+    youtube: document.getElementById('st-youtube')?.value?.trim() || "#"
+  };
+
+  Storage.set('abd_store_settings', newSettings);
+  Toast.show('Store settings & footer details updated! 🎉', 'success');
+  routeRender(location.hash || '#/admin/settings');
+  document.title = `${newSettings.name} — Store & Art Gallery`;
+}
+
+function renderAdminDashboard(){
+  const{totalOrders,totalRevenue,totalProducts,totalCustomers,pendingOrders,revenueGrowth,ordersGrowth,customersGrowth}=ADMIN_STATS;
+  return`<div class="stat-grid">
+    <div class="stat-card blue"><div class="s-icon">💰</div><div class="s-label">Total Revenue</div><div class="s-value">${fmt.price(totalRevenue)}</div><div class="s-change up">▲ ${revenueGrowth}% this month</div></div>
+    <div class="stat-card green"><div class="s-icon">📦</div><div class="s-label">Total Orders</div><div class="s-value">${fmt.number(totalOrders)}</div><div class="s-change up">▲ ${ordersGrowth}% this month</div></div>
+    <div class="stat-card yellow"><div class="s-icon">📚</div><div class="s-label">Products</div><div class="s-value">${totalProducts}</div><div class="s-change up">+5 new this week</div></div>
+    <div class="stat-card red"><div class="s-icon">👥</div><div class="s-label">Customers</div><div class="s-value">${fmt.number(totalCustomers)}</div><div class="s-change up">▲ ${customersGrowth}% this month</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="card"><div class="card-header"><h3 style="font-size:14px;font-weight:700">📊 Revenue Overview (Jan–Jun)</h3></div><div class="card-body">${['Jan','Feb','Mar','Apr','May','Jun'].map((m,i)=>{const h=[45,60,38,75,82,90][i];return`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="width:32px;font-size:12px;color:var(--text-muted)">${m}</span><div style="flex:1;height:20px;background:var(--bg);border-radius:4px;overflow:hidden"><div style="width:${h}%;height:100%;background:var(--primary);border-radius:4px"></div></div><span style="font-size:12px;font-weight:600;width:60px;text-align:right">${fmt.price(Math.round(h*1800))}</span></div>`;}).join('')}</div></div>
+    <div class="card"><div class="card-header"><h3 style="font-size:14px;font-weight:700">📦 Pending Orders (${pendingOrders})</h3></div><div class="card-body">${Array.from({length:5},(_,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-size:13px;font-weight:600">#ORD${1000+i}</div><div style="font-size:11px;color:var(--text-muted)">${['Priya','Rahul','Anjali','Mohit','Sonal'][i]} • ${['Books','Stationery','Toys','Gifts','Pens'][i]}</div></div><span class="badge badge-warning">Pending</span><span style="font-size:13px;font-weight:700">${fmt.price([340,890,560,1200,450][i])}</span></div>`).join('')}</div></div>
+  </div>
+  <div class="data-table-wrap"><div class="data-table-header"><h3>Recent Products</h3><a class="btn btn-primary btn-sm" onclick="navigate('#/admin/products')">View All</a></div><div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Rating</th></tr></thead><tbody>${PRODUCTS.slice(0,8).map(p=>`<tr><td><div style="display:flex;align-items:center;gap:10px"><img class="table-img" src="${p.image}" alt="${p.name}"/><div style="font-size:13px;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</div></div></td><td><span class="badge badge-primary">${p.category}</span></td><td><strong>${fmt.price(p.price)}</strong></td><td><span class="${p.stock<5?'badge badge-warning':p.stock===0?'badge badge-danger':'badge badge-success'}">${p.stock}</span></td><td>⭐${p.rating}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function renderAdminProducts(){
+  return`<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+    <input class="form-input" style="max-width:280px;flex:1" placeholder="🔍 Search products…" oninput="adminSearchFn(this.value)"/>
+    <button class="btn btn-primary" onclick="showAddModal()">+ Add Product</button>
+    <select class="form-input form-select" style="max-width:160px" onchange="adminFilterCatFn(this.value)"><option value="">All Categories</option>${CATEGORIES.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>
+  </div>
+  <div class="data-table-wrap"><div class="data-table-header"><h3>All Products (${PRODUCTS.length})</h3></div><div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Price / MRP</th><th>Discount</th><th>Stock</th><th>Rating</th><th>Actions</th></tr></thead><tbody id="admin-products-tbody">${PRODUCTS.slice(0,25).map(p=>`<tr id="admin-row-${p.id}"><td><div style="display:flex;align-items:center;gap:10px"><img class="table-img" src="${p.image}" alt="${p.name}"/><div><div style="font-weight:600;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</div><div style="font-size:11px;color:var(--text-muted)">${p.brand}</div></div></div></td><td><span class="badge badge-primary">${p.category}</span></td><td>${fmt.price(p.price)}<br/><span style="font-size:11px;text-decoration:line-through;color:var(--text-muted)">${fmt.price(p.mrp)}</span></td><td><span class="badge badge-danger">${p.discount}%</span></td><td><span class="${p.stock<5?'badge badge-warning':p.stock===0?'badge badge-danger':'badge badge-success'}">${p.stock}</span></td><td>⭐${p.rating}</td><td><div class="action-btns"><button class="btn-icon-sm btn-edit" onclick="openEditProductModal(${p.id})">✏️</button><button class="btn-icon-sm btn-del" onclick="delProduct(${p.id})">🗑️</button></div></td></tr>`).join('')}</tbody></table></div></div>
+  <div id="add-product-modal" class="modal-overlay" style="display:none"><div class="modal" style="max-width:500px"><div class="modal-header"><h3>Add New Product</h3><span class="modal-close" onclick="document.getElementById('add-product-modal').style.display='none'">×</span></div><div class="modal-body">
+    <div class="form-group"><label class="form-label">Product Name</label><input class="form-input" id="ap-name" placeholder="Product Name"/></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">Price</label><input class="form-input" id="ap-price" type="number" placeholder="₹"/></div><div class="form-group"><label class="form-label">MRP</label><input class="form-input" id="ap-mrp" type="number" placeholder="₹"/></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">Category</label><select class="form-input form-select" id="ap-category">${CATEGORIES.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select></div><div class="form-group"><label class="form-label">Brand</label><input class="form-input" id="ap-brand" placeholder="Brand name"/></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">Stock</label><input class="form-input" id="ap-stock" type="number" placeholder="Qty"/></div><div class="form-group"><label class="form-label">Rating</label><input class="form-input" id="ap-rating" type="number" step="0.1" min="1" max="5" placeholder="4.5"/></div></div>
+    <div class="form-group"><label class="form-label">Description</label><textarea class="form-input" id="ap-description" rows="3" placeholder="Product description…"></textarea></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary btn-full" onclick="saveProduct()">Save Product</button><button class="btn btn-ghost" onclick="document.getElementById('add-product-modal').style.display='none'">Cancel</button></div>
+  </div></div></div>`;
+}
+
+function renderAdminOrders(){
+  const orders=Orders.getAll();
+  const demo=[...orders,...Array.from({length:Math.max(0,8-orders.length)},(_,i)=>({id:`ABD${1000+i}`,items:[{name:'NCERT Math'}],total:[340,890,560,1200,450,670,890,310][i],status:['confirmed','pending','delivered','shipped','confirmed','pending','delivered','confirmed'][i],placedAt:new Date(Date.now()-i*86400000).toISOString(),estimatedDelivery:'5 Jul 2025'}))].slice(0,10);
+  const names=['Priya S.','Rahul G.','Anjali S.','Mohit V.','Sonal K.','Deepak M.','Neha R.','Arjun T.','Riya P.','Amit K.'];
+  return`<div class="data-table-wrap"><div class="data-table-header"><h3>Recent Orders</h3><button class="btn btn-outline btn-sm">Export CSV</button></div><div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>${demo.map((o,i)=>`<tr><td><strong>#${o.id}</strong></td><td>${names[i%8]}</td><td>${o.items?.length||1} items</td><td><strong>${fmt.price(o.total||0)}</strong></td><td><span class="badge ${o.status==='delivered'?'badge-success':o.status==='pending'?'badge-warning':o.status==='shipped'?'badge-primary':'badge-success'}">${o.status?.toUpperCase()}</span></td><td>${fmt.date(o.placedAt)}</td><td><div class="action-btns"><button class="btn-icon-sm btn-edit">👁️</button><button class="btn-icon-sm btn-del">✕</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function renderAdminCustomers(){
+  const customers=[{name:'Priya Sharma',email:'priya@email.com',mobile:'9876543210',orders:5,total:3450,joined:'Jan 2025'},{name:'Rahul Gupta',email:'rahul@email.com',mobile:'8765432109',orders:12,total:8920,joined:'Feb 2025'},{name:'Anjali Singh',email:'anjali@email.com',mobile:'7654321098',orders:3,total:1230,joined:'Mar 2025'},{name:'Mohit Verma',email:'mohit@email.com',mobile:'6543210987',orders:8,total:5670,joined:'Apr 2025'},{name:'Sonal Kapoor',email:'sonal@email.com',mobile:'9988776655',orders:15,total:11200,joined:'Jan 2025'}];
+  return`<div class="data-table-wrap"><div class="data-table-header"><h3>All Customers</h3><input class="form-input" style="max-width:220px" placeholder="Search customers…"/></div><div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Customer</th><th>Mobile</th><th>Orders</th><th>Total Spend</th><th>Joined</th><th>Actions</th></tr></thead><tbody>${customers.map(c=>`<tr><td><div style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;background:var(--primary);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:700">${c.name[0]}</div><div><div style="font-weight:600;font-size:13px">${c.name}</div><div style="font-size:11px;color:var(--text-muted)">${c.email}</div></div></div></td><td>${c.mobile}</td><td><span class="badge badge-primary">${c.orders} orders</span></td><td><strong>${fmt.price(c.total)}</strong></td><td style="color:var(--text-muted);font-size:13px">${c.joined}</td><td><div class="action-btns"><button class="btn-icon-sm btn-edit">👁️</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function renderAdminInventory(){
+  const low=PRODUCTS.filter(p=>p.stock<10);
+  return`<div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+    <div class="stat-card green"><div class="s-icon">✅</div><div class="s-label">In Stock</div><div class="s-value">${PRODUCTS.filter(p=>p.stock>10).length}</div></div>
+    <div class="stat-card yellow"><div class="s-icon">⚠️</div><div class="s-label">Low Stock (&lt;10)</div><div class="s-value">${low.length}</div></div>
+    <div class="stat-card red"><div class="s-icon">❌</div><div class="s-label">Out of Stock</div><div class="s-value">${PRODUCTS.filter(p=>p.stock===0).length}</div></div>
+  </div>
+  <div class="data-table-wrap"><div class="data-table-header"><h3>Low Stock Alerts</h3></div><div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Action</th></tr></thead><tbody>${low.map(p=>`<tr><td><div style="display:flex;align-items:center;gap:8px"><img class="table-img" src="${p.image}" alt="${p.name}"/><span style="font-size:13px;font-weight:600">${p.name.substring(0,40)}</span></div></td><td><span class="badge badge-primary">${p.category}</span></td><td><span class="${p.stock===0?'badge badge-danger':'badge badge-warning'}">${p.stock} units</span></td><td><button class="btn btn-primary btn-sm" onclick="Toast.show('Restock request sent!','success')">Restock</button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+// ============================================================
+// EVENT HANDLERS & ACTIONS
+// ============================================================
+function doAddToCart(id){
+  const p=PRODUCTS.find(p=>p.id===id);if(!p)return;
+  Cart.add(p);
+  const btn=document.getElementById(`cart-btn-${id}`);
+  if(btn){btn.textContent='✓ Added';btn.classList.add('added');}
+  updateBadges();
+}
+function doToggleWishlist(id){
+  const p=PRODUCTS.find(p=>p.id===id);if(!p)return;
+  Wishlist.toggle(p);
+  const btn=document.getElementById(`wish-btn-${id}`);
+  if(btn){const inWish=Wishlist.has(id);btn.textContent=inWish?'❤️':'🤍';btn.classList.toggle('active',inWish);}
+  // Update detail page wish btn too
+  const dwb=document.getElementById('detail-wish-btn');
+  if(dwb){const inWish=Wishlist.has(id);dwb.textContent=inWish?'❤️':'🤍';dwb.className=`btn${inWish?' btn-danger':' btn-outline'}`;}
+  updateBadges();
+}
+function removeItem(id){Cart.remove(id);renderPage();}
+function updateQty(id,qty){Cart.updateQty(id,qty);renderPage();}
+function moveToWish(id){const p=PRODUCTS.find(p=>p.id===id);if(p&&!Wishlist.has(id))Wishlist.toggle(p);Cart.remove(id);renderPage();updateBadges();}
+function applyCouponFn(){
+  const code=document.getElementById('coupon-input')?.value?.trim();
+  if(!code){Toast.show('Please enter a coupon code','error');return;}
+  const result=Cart.applyCoupon(code);
+  const msg=document.getElementById('coupon-msg');
+  if(result.ok){
+    appliedCoupon=result;
+    if(msg){msg.style.color='var(--success)';msg.textContent=`✅ Coupon applied! You save ${result.type==='percent'?result.rate+'%':'₹'+result.discount}.`;}
+    const row=document.getElementById('coupon-discount-row');const val=document.getElementById('coupon-discount-val');
+    if(row)row.style.display='flex';if(val)val.textContent='−'+fmt.price(result.discount);
+    Toast.show(`Coupon ${code} applied! 🎉`,'success');
+  }else{if(msg){msg.style.color='var(--danger)';msg.textContent='❌ '+result.error;}Toast.show(result.error,'error');}
+}
+function copyCoupon(code){navigator.clipboard?.writeText(code).catch(()=>{});Toast.show(`Coupon "${code}" copied! 📋`,'success');}
+async function placeOrderFn(){
+  const name=document.getElementById('co-name')?.value?.trim();
+  const mobile=document.getElementById('co-mobile')?.value?.trim();
+  const address=document.getElementById('co-address')?.value?.trim();
+  if(!name||!mobile||!address){Toast.show('Please fill in all required fields','error');return;}
+  if(mobile.length!==10){Toast.show('Please enter a valid 10-digit mobile number','error');return;}
+  const subtotal=Cart.getTotal(),shipping=subtotal>=499?0:49,gst=Math.round(subtotal*0.05);
+  const total=subtotal+shipping+gst-(appliedCoupon?.discount||0);
+  const order=await Orders.place({items:CartState.get().items,total:Math.max(total,0),address:{name,mobile,address},payment:document.querySelector('input[name="payment"]:checked')?.value||'cod',coupon:appliedCoupon?.code||null});
+  appliedCoupon=null;
+  navigate(`#/order-success?id=${order.id}`);
+}
+async function doLogin(){
+  const email=document.getElementById('login-email')?.value?.trim();
+  const password=document.getElementById('login-password')?.value;
+  if(!email||!password){showErr('login-error','Please fill in all fields');return;}
+  const result=await Auth.login(email,password);
+  if(result.ok){Toast.show(`Welcome back! 👋`,'success');navigate('#/');}
+  else showErr('login-error',result.error);
+}
+async function doSignup(){
+  const name=document.getElementById('signup-name')?.value?.trim();
+  const mobile=document.getElementById('signup-mobile')?.value?.trim();
+  const email=document.getElementById('signup-email')?.value?.trim();
+  const password=document.getElementById('signup-password')?.value;
+  const confirm=document.getElementById('signup-confirm')?.value;
+  const address=document.getElementById('signup-address')?.value?.trim();
+  if(!name||!mobile||!email||!password){showErr('signup-error','Please fill in all required fields');return;}
+  if(password.length<6){showErr('signup-error','Password must be at least 6 characters');return;}
+  if(password!==confirm){showErr('signup-error','Passwords do not match');return;}
+  if(mobile.length!==10){showErr('signup-error','Please enter a valid 10-digit mobile number');return;}
+  const result=await Auth.register({name,mobile,email,password,address});
+  if(result.ok){Toast.show(`Account created! Welcome, ${name}! 🎉`,'success');navigate('#/');}
+  else showErr('signup-error',result.error);
+}
+function doLogout(){Auth.logout();Toast.show('Logged out. See you soon! 👋','info');navigate('#/');}
+function showErr(id,msg){const el=document.getElementById(id);if(el){el.textContent='⚠️ '+msg;el.style.display='block';}}
+function togglePwdFn(inputId,el){const inp=document.getElementById(inputId);if(!inp)return;inp.type=inp.type==='password'?'text':'password';el.textContent=inp.type==='password'?'👁':'🙈';}
+function toggleThemeFn(){Theme.toggle();const icon=document.getElementById('theme-icon');if(icon)icon.textContent=ThemeState.get().dark?'☀️':'🌙';}
+function selectPaymentFn(el){document.querySelectorAll('.payment-option').forEach(o=>o.classList.remove('selected'));el?.classList.add('selected');}
+function changeQtyFn(dir){const inp=document.getElementById('qty-input');if(!inp)return;inp.value=Math.max(1,Math.min(10,parseInt(inp.value)+dir));}
+function addToCartFromDetail(id){const p=PRODUCTS.find(p=>p.id===id);const qty=parseInt(document.getElementById('qty-input')?.value||1);if(!p)return;Cart.add(p,qty);const btn=document.getElementById('detail-cart-btn');if(btn){btn.textContent='✓ Go to Cart';btn.onclick=()=>navigate('#/cart');}updateBadges();}
+function buyNowFn(id){const p=PRODUCTS.find(p=>p.id===id);if(!p)return;Cart.add(p);navigate('#/checkout');updateBadges();}
+function changeImg(src,thumbEl){const main=document.getElementById('gallery-main-img');if(main){main.style.opacity='0';setTimeout(()=>{main.src=src;main.style.opacity='1';},150);}document.querySelectorAll('.gallery-thumb').forEach(t=>t.classList.remove('active'));thumbEl?.classList.add('active');}
+function switchTabFn(tab,btn){['description','specifications','reviews'].forEach(t=>{const el=document.getElementById('tab-'+t);if(el)el.style.display=t===tab?'block':'none';});document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));btn?.classList.add('active');}
+
+// Filter functions
+function updateProductsGridOnly() {
+  const grid = document.getElementById('products-grid');
+  if (!grid) {
+    renderProductsPage();
+    return;
+  }
+  const { category, sort, search, maxPrice, rating, page } = productFilters;
+  const PER_PAGE = 20;
+  let products = [...PRODUCTS];
+  if (category && category !== 'all') products = products.filter(p => p.category === category);
+  if (search) products = Search.query(search, products);
+  if (maxPrice < 2500) products = products.filter(p => p.price <= maxPrice);
+  if (rating > 0) products = products.filter(p => p.rating >= rating);
+  if (sort === 'price_asc')  products.sort((a, b) => a.price - b.price);
+  if (sort === 'price_desc') products.sort((a, b) => b.price - a.price);
+  if (sort === 'rating')     products.sort((a, b) => b.rating - a.rating);
+  if (sort === 'discount')   products.sort((a, b) => b.discount - a.discount);
+  if (sort === 'new')        products = products.slice().reverse();
+
+  const total = products.length;
+  const pages = Math.ceil(total / PER_PAGE);
+  const curPage = page || 1;
+  const paginated = products.slice((curPage - 1) * PER_PAGE, curPage * PER_PAGE);
+
+  grid.className = currentView === 'list' ? 'products-list' : 'products-grid';
+  grid.innerHTML = paginated.length > 0
+    ? paginated.map(p => currentView === 'list' ? renderProductCardList(p) : renderProductCard(p)).join('')
+    : `<div style="grid-column:1/-1" class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No Products Found</div><div class="empty-sub">Try adjusting filters</div><button class="btn btn-primary" onclick="clearFilters()">Clear Filters</button></div>`;
+
+  const countEl = document.querySelector('.products-count');
+  if (countEl) {
+    const catLabel = category && category !== 'all' ? CATEGORIES.find(c => c.id === category)?.name || category : 'All Products';
+    countEl.innerHTML = `<strong>${total}</strong> products in ${catLabel}${search ? ' for "' + search + '"' : ''}`;
+  }
+
+  const paginationWrap = document.getElementById('products-pagination');
+  if (paginationWrap) {
+    paginationWrap.innerHTML = pages > 1
+      ? `<div style="display:flex;justify-content:center;gap:8px;margin-top:32px;flex-wrap:wrap">${Array.from({length: pages}, (_, i) => `<button class="btn ${i + 1 === curPage ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="goToPage(${i + 1})">${i + 1}</button>`).join('')}</div>`
+      : '';
+  }
+}
+
+function filterByCategory(catId, checked) {
+  productFilters.category = checked ? catId : 'all';
+  productFilters.page = 1;
+  updateProductsGridOnly();
+}
+function clearFilters() {
+  productFilters = { category: 'all', sort: 'default', search: '', maxPrice: 2500, rating: 0, page: 1 };
+  renderProductsPage();
+}
+function sortProductsFn(sort) {
+  productFilters.sort = sort;
+  updateProductsGridOnly();
+}
+function goToPage(page) {
+  productFilters.page = page;
+  updateProductsGridOnly();
+  window.scrollTo({ top: 100, behavior: 'smooth' });
+}
+function filterByRating(r) {
+  productFilters.rating = r;
+  productFilters.page = 1;
+  updateProductsGridOnly();
+}
+function updatePriceFilter(v) {
+  productFilters.maxPrice = parseInt(v);
+  productFilters.page = 1;
+  const lbl = document.getElementById('price-label');
+  if (lbl) lbl.textContent = '₹' + v;
+  updateProductsGridOnly();
+}
+function setViewFn(view) {
+  currentView = view;
+  updateProductsGridOnly();
+}
+
+// Profile tab
+function showProfileTabFn(tab,el){
+  document.querySelectorAll('.profile-nav-item').forEach(i=>i.classList.remove('active'));el?.classList.add('active');
+  const c=document.getElementById('profile-content');if(!c)return;
+  if(tab==='orders')c.innerHTML=renderOrdersTab(Orders.getAll());
+  else if(tab==='wishlist'){const{items}=WishlistState.get();c.innerHTML=items.length?`<h3 style="font-weight:700;margin-bottom:16px">Wishlist (${items.length})</h3><div class="products-grid">${items.map(p=>renderProductCard(p)).join('')}</div>`:`<div class="empty-state"><div class="empty-icon">🤍</div><div class="empty-title">No Wishlist Items</div></div>`;}
+  else if(tab==='addresses'){const u=AuthState.get().user;c.innerHTML=`<h3 style="font-weight:700;margin-bottom:16px">Saved Addresses</h3>${u?.address?`<div class="card"><div class="card-body"><span class="badge badge-primary">Home</span><span class="badge badge-success" style="margin-left:8px">Default</span><p style="margin-top:10px;font-size:14px;line-height:1.8">${u.name}<br/>${u.address}<br/>📱 ${u.mobile}</p></div></div>`:`<div class="empty-state" style="padding:40px"><div class="empty-icon">📍</div><div class="empty-title">No Addresses Saved</div></div>`}<button class="btn btn-primary btn-sm" style="margin-top:12px">+ Add New Address</button>`;}
+  else if(tab==='settings'){const dark=ThemeState.get().dark;c.innerHTML=`<h3 style="font-weight:700;margin-bottom:16px">Settings</h3><div class="card"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)"><div><div style="font-weight:600">Dark Mode</div><div style="font-size:12px;color:var(--text-muted)">Toggle dark/light theme</div></div><button class="theme-toggle${dark?' dark':''}" onclick="toggleThemeFn();showProfileTabFn('settings',document.querySelector('.profile-nav-item.active'))"><span class="toggle-knob">${dark?'☀️':'🌙'}</span></button></div><div style="padding:12px 0"><button class="btn btn-danger btn-sm" onclick="doLogout()">🚪 Logout</button></div></div></div>`;}
+}
+
+// ── Admin Product Editing Suite (Non-Coder Shopkeeper UI) ────
+const PRESET_COVERS = [
+  { name: 'NCERT Book 1', url: 'https://picsum.photos/seed/book1/400/400' },
+  { name: 'NCERT Book 2', url: 'https://picsum.photos/seed/book2/400/400' },
+  { name: 'NCERT Book 3', url: 'https://picsum.photos/seed/book3/400/400' },
+  { name: 'NCERT Book 4', url: 'https://picsum.photos/seed/book4/400/400' },
+  { name: 'Reynolds Pen', url: 'https://picsum.photos/seed/pen1/400/400' },
+  { name: 'Pilot V5 Pen', url: 'https://picsum.photos/seed/pen3/400/400' },
+  { name: 'Parker Pen', url: 'https://picsum.photos/seed/pen4/400/400' },
+  { name: 'Navneet Copy', url: 'https://picsum.photos/seed/note1/400/400' },
+  { name: 'Classmate A4', url: 'https://picsum.photos/seed/note2/400/400' },
+  { name: 'Jumbo Register', url: 'https://picsum.photos/seed/note3/400/400' },
+  { name: 'Acrylic Paints', url: 'https://picsum.photos/seed/art1/400/400' },
+  { name: 'Watercolours', url: 'https://picsum.photos/seed/art3/400/400' },
+  { name: 'LEGO Bricks', url: 'https://picsum.photos/seed/toy1/400/400' },
+  { name: 'Rubik Cube', url: 'https://picsum.photos/seed/toy2/400/400' },
+  { name: 'Red Roses', url: 'https://picsum.photos/seed/flower1/400/400' },
+  { name: 'Gift Box', url: 'https://picsum.photos/seed/gift4/400/400' }
+];
+
+function handleImageFileUpload(input, previewId, inputId) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const dataUrl = e.target.result;
+    const prev = document.getElementById(previewId);
+    const inp = document.getElementById(inputId);
+    if (prev) prev.src = dataUrl;
+    if (inp) inp.value = dataUrl;
+    Toast.show('Image loaded from device gallery! 🖼️', 'success');
+  };
+  reader.readAsDataURL(file);
+}
+
+function showAddModal(){
+  openAddProductModal();
+}
+
+function selectPresetImageAdd(url) {
+  const inp = document.getElementById('ap-image');
+  const prev = document.getElementById('ap-img-preview');
+  if (inp) inp.value = url;
+  if (prev) prev.src = url;
+  Toast.show('Preset image selected!', 'info');
+}
+
+function autoCalcDiscountAdd() {
+  const p = parseFloat(document.getElementById('ap-price')?.value || 0);
+  const m = parseFloat(document.getElementById('ap-mrp')?.value || 0);
+  if (m > 0 && p > 0) {
+    const disc = Math.max(0, Math.round((1 - p / m) * 100));
+    const discEl = document.getElementById('ap-discount');
+    if (discEl) discEl.value = disc;
+  }
+}
+
+function openAddProductModal() {
+  if (!isAdminUser()) {
+    promptAdminPin(() => openAddProductModal());
+    return;
+  }
+  let modal = document.getElementById('add-product-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'add-product-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const presetsHtml = PRESET_COVERS.map(c => 
+    `<img class="preset-thumb" src="${c.url}" title="${c.name}" onclick="selectPresetImageAdd('${c.url}')" />`
+  ).join('');
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header">
+        <h3>✨ Add New Product</h3>
+        <span class="modal-close" onclick="document.getElementById('add-product-modal').style.display='none'">×</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Product Name *</label>
+          <input class="form-input" id="ap-name" placeholder="e.g. Camlin Acrylic Colors Set" />
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="form-group">
+            <label class="form-label">Selling Price (₹) *</label>
+            <input class="form-input" id="ap-price" type="number" placeholder="299" oninput="autoCalcDiscountAdd()" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">MRP (₹) *</label>
+            <input class="form-input" id="ap-mrp" type="number" placeholder="450" oninput="autoCalcDiscountAdd()" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Discount (%)</label>
+            <input class="form-input" id="ap-discount" type="number" placeholder="34" />
+          </div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-input form-select" id="ap-category">
+              ${CATEGORIES.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Brand</label>
+            <input class="form-input" id="ap-brand" placeholder="Brand name" />
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">Stock Quantity</label>
+            <input class="form-input" id="ap-stock" type="number" value="25" placeholder="Qty" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Rating (1 to 5)</label>
+            <input class="form-input" id="ap-rating" type="number" step="0.1" min="1" max="5" value="4.5" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">🖼️ Product Image (Device Gallery, Preset or Link)</label>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div class="img-preview-container">
+              <img id="ap-img-preview" src="https://picsum.photos/seed/newprod/400/400" alt="Preview" />
+            </div>
+            <div style="flex:1">
+              <div style="margin-bottom:8px">
+                <label class="btn btn-outline btn-sm" style="cursor:pointer;width:100%;text-align:center;display:block">
+                  📁 Choose Photo from Device Gallery
+                  <input type="file" accept="image/*" style="display:none" onchange="handleImageFileUpload(this, 'ap-img-preview', 'ap-image')" />
+                </label>
+              </div>
+              <input class="form-input" id="ap-image" value="https://picsum.photos/seed/newprod/400/400" oninput="document.getElementById('ap-img-preview').src=this.value" placeholder="https://..." />
+              <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Or pick a preset sample cover:</p>
+              <div class="preset-cover-grid">${presetsHtml}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-input" id="ap-description" rows="2" placeholder="Product details..."></textarea>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn btn-primary btn-full" onclick="saveProduct()">✨ Add Product</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('add-product-modal').style.display='none'">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.style.display = 'flex';
+}
+
+function openEditProductModal(id, focusField = null) {
+  if (!isAdminUser()) {
+    promptAdminPin(() => openEditProductModal(id, focusField));
+    return;
+  }
+  const p = PRODUCTS.find(prod => prod.id === parseInt(id));
+  if (!p) { Toast.show('Product not found', 'error'); return; }
+  
+  let modal = document.getElementById('edit-product-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'edit-product-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  
+  const presetsHtml = PRESET_COVERS.map(c => 
+    `<img class="preset-thumb" src="${c.url}" title="${c.name}" onclick="selectPresetImage('${c.url}')" />`
+  ).join('');
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header">
+        <h3>✏️ Edit Product — <span style="font-weight:400;font-size:14px;color:var(--text-secondary)">ID #${p.id}</span></h3>
+        <span class="modal-close" onclick="document.getElementById('edit-product-modal').style.display='none'">×</span>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ep-id" value="${p.id}" />
+        <div class="form-group">
+          <label class="form-label">Product Title *</label>
+          <input class="form-input" id="ep-name" value="${p.name.replace(/"/g, '&quot;')}" placeholder="e.g. NCERT Maths Class 10" />
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="form-group">
+            <label class="form-label">Selling Price (₹) *</label>
+            <input class="form-input" id="ep-price" type="number" value="${p.price}" oninput="autoCalcDiscount()" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">MRP (₹) *</label>
+            <input class="form-input" id="ep-mrp" type="number" value="${p.mrp}" oninput="autoCalcDiscount()" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Discount (%)</label>
+            <input class="form-input" id="ep-discount" type="number" value="${p.discount}" oninput="autoCalcPriceFromDiscount()" />
+          </div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-input form-select" id="ep-category">
+              ${CATEGORIES.map(c => `<option value="${c.id}"${c.id === p.category ? ' selected' : ''}>${c.icon} ${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Brand</label>
+            <input class="form-input" id="ep-brand" value="${p.brand}" placeholder="Brand name" />
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">Stock Quantity</label>
+            <input class="form-input" id="ep-stock" type="number" value="${p.stock}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Rating (1 to 5)</label>
+            <input class="form-input" id="ep-rating" type="number" step="0.1" min="1" max="5" value="${p.rating}" />
+          </div>
+        </div>
+
+        <div class="form-group" id="ep-image-group">
+          <label class="form-label">🖼️ Product Image (Device Gallery, Preset or Link)</label>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div class="img-preview-container">
+              <img id="ep-img-preview" src="${p.image}" alt="Preview" onerror="this.src='https://picsum.photos/seed/default/400/400'" />
+            </div>
+            <div style="flex:1">
+              <div style="margin-bottom:8px">
+                <label class="btn btn-outline btn-sm" style="cursor:pointer;width:100%;text-align:center;display:block">
+                  📁 Choose Photo from Device Gallery
+                  <input type="file" accept="image/*" style="display:none" onchange="handleImageFileUpload(this, 'ep-img-preview', 'ep-image')" />
+                </label>
+              </div>
+              <input class="form-input" id="ep-image" value="${p.image}" oninput="document.getElementById('ep-img-preview').src=this.value" placeholder="https://..." />
+              <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Click a preset image cover below to quickly pick an image:</p>
+              <div class="preset-cover-grid">${presetsHtml}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-input" id="ep-description" rows="2" placeholder="Product details...">${p.description || ''}</textarea>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn btn-primary btn-full" onclick="saveEditProduct()">💾 Save Changes</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('edit-product-modal').style.display='none'">Cancel</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  modal.style.display = 'flex';
+
+  if (focusField === 'image') {
+    setTimeout(() => {
+      const imgGroup = document.getElementById('ep-image-group');
+      if (imgGroup) {
+        imgGroup.scrollIntoView({ behavior: 'smooth' });
+        document.getElementById('ep-image')?.focus();
+      }
+    }, 100);
+  } else if (focusField === 'price') {
+    setTimeout(() => {
+      document.getElementById('ep-price')?.focus();
+    }, 100);
+  }
+}
+
+function selectPresetImage(url) {
+  const inp = document.getElementById('ep-image');
+  const prev = document.getElementById('ep-img-preview');
+  if (inp) inp.value = url;
+  if (prev) prev.src = url;
+  Toast.show('Preset image selected!', 'info');
+}
+
+function autoCalcDiscount() {
+  const p = parseFloat(document.getElementById('ep-price')?.value || 0);
+  const m = parseFloat(document.getElementById('ep-mrp')?.value || 0);
+  if (m > 0 && p > 0) {
+    const disc = Math.max(0, Math.round((1 - p / m) * 100));
+    const discEl = document.getElementById('ep-discount');
+    if (discEl) discEl.value = disc;
+  }
+}
+
+function autoCalcPriceFromDiscount() {
+  const d = parseFloat(document.getElementById('ep-discount')?.value || 0);
+  const m = parseFloat(document.getElementById('ep-mrp')?.value || 0);
+  if (m > 0 && d >= 0) {
+    const p = Math.round(m * (1 - d / 100));
+    const priceEl = document.getElementById('ep-price');
+    if (priceEl) priceEl.value = p;
+  }
+}
+
+async function saveEditProduct() {
+  const id = parseInt(document.getElementById('ep-id')?.value);
+  const name = document.getElementById('ep-name')?.value?.trim();
+  const price = parseFloat(document.getElementById('ep-price')?.value);
+  const mrp = parseFloat(document.getElementById('ep-mrp')?.value);
+  const discount = parseInt(document.getElementById('ep-discount')?.value) || 0;
+  const category = document.getElementById('ep-category')?.value || 'stationery';
+  const brand = document.getElementById('ep-brand')?.value || 'Generic';
+  const stock = parseInt(document.getElementById('ep-stock')?.value) || 0;
+  const rating = parseFloat(document.getElementById('ep-rating')?.value) || 4.5;
+  const image = document.getElementById('ep-image')?.value?.trim() || `https://picsum.photos/seed/${id}/400/400`;
+  const description = document.getElementById('ep-description')?.value || '';
+
+  if (!name || isNaN(price) || isNaN(mrp)) {
+    Toast.show('Please fill in required fields (Title, Price, MRP)', 'error');
+    return;
+  }
+
+  const updateData = { name, price, mrp, discount, category, brand, stock, rating, image, description };
+
+  if (backendActive) {
+    try {
+      await apiRequest(`/products/${id}`, "PUT", updateData);
+      Toast.show(`Product "${name}" updated in database! ✅`, 'success');
+      document.getElementById('edit-product-modal').style.display = 'none';
+      await loadProducts();
+      routeRender(location.hash || '#/');
+      return;
+    } catch(e) {
+      Toast.show("Backend update failed: " + e.message + ". Updating locally.", "warning");
+    }
+  }
+
+  const idx = PRODUCTS.findIndex(p => p.id === id);
+  if (idx !== -1) {
+    PRODUCTS[idx] = { ...PRODUCTS[idx], ...updateData };
+    window.PRODUCTS = PRODUCTS;
+    const localProds = Storage.get('abd_custom_products', {});
+    localProds[id] = PRODUCTS[idx];
+    Storage.set('abd_custom_products', localProds);
+  }
+
+  document.getElementById('edit-product-modal').style.display = 'none';
+  Toast.show(`Product "${name}" updated successfully! 🎉`, 'success');
+  routeRender(location.hash || '#/');
+}
+
+async function saveProduct(){
+  const name=document.getElementById('ap-name')?.value?.trim();
+  const price=parseFloat(document.getElementById('ap-price')?.value);
+  const mrp=parseFloat(document.getElementById('ap-mrp')?.value);
+  if(!name||!price||!mrp){Toast.show('Please fill in required fields','error');return;}
+  const prodData = {
+    name,
+    price,
+    mrp,
+    discount: Math.round((1-price/mrp)*100),
+    category: document.getElementById('ap-category')?.value || 'stationery',
+    brand: document.getElementById('ap-brand')?.value || 'Generic',
+    stock: parseInt(document.getElementById('ap-stock')?.value) || 0,
+    rating: parseFloat(document.getElementById('ap-rating')?.value) || 4.0,
+    reviews: 0,
+    description: document.getElementById('ap-description')?.value || '',
+    image: `https://picsum.photos/seed/${Date.now()}/400/400`,
+    tags: [document.getElementById('ap-category')?.value || 'stationery']
+  };
+  if (backendActive) {
+    try {
+      const res = await apiRequest("/products", "POST", prodData);
+      if (res) {
+        Toast.show(`Product "${name}" added to database! ✅`,'success');
+        document.getElementById('add-product-modal').style.display='none';
+        await loadProducts();
+        routeRender(location.hash||'#/');
+        return;
+      }
+    } catch(e) {
+      Toast.show("Failed to save to database: " + e.message, "error");
+    }
+  }
+  const newP={id:Date.now(),...prodData};
+  PRODUCTS.unshift(newP);window.PRODUCTS=PRODUCTS;
+  const localProds = Storage.get('abd_custom_products', {});
+  localProds[newP.id] = newP;
+  Storage.set('abd_custom_products', localProds);
+
+  document.getElementById('add-product-modal').style.display='none';
+  Toast.show(`Product "${name}" added locally! ✅`,'success');
+  routeRender(location.hash||'#/');
+}
+
+async function delProduct(id){
+  const p = PRODUCTS.find(prod => prod.id === id);
+  const name = p ? p.name : `ID #${id}`;
+  if(!confirm(`Are you sure you want to delete "${name}"?`))return;
+  if (backendActive) {
+    try {
+      await apiRequest(`/products/${id}`, "DELETE");
+      Toast.show(`Product "${name}" deleted from database!`, 'success');
+      await loadProducts();
+      routeRender(location.hash||'#/');
+      return;
+    } catch(e) {
+      Toast.show("Failed to delete from database: " + e.message, "error");
+    }
+  }
+  const idx=PRODUCTS.findIndex(p=>p.id===id);if(idx!==-1)PRODUCTS.splice(idx,1);
+  const localProds = Storage.get('abd_custom_products', {});
+  delete localProds[id];
+  Storage.set('abd_custom_products', localProds);
+
+  const row=document.getElementById(`admin-row-${id}`);if(row)row.remove();
+  Toast.show(`Product "${name}" deleted`, 'info');
+  routeRender(location.hash||'#/');
+}
+
+function adminSearchFn(q){
+  const tbody=document.getElementById('admin-products-tbody');if(!tbody)return;
+  const filtered=q?PRODUCTS.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.brand.toLowerCase().includes(q.toLowerCase())):PRODUCTS;
+  tbody.innerHTML=filtered.slice(0,25).map(p=>`<tr id="admin-row-${p.id}"><td><div style="display:flex;align-items:center;gap:10px"><img class="table-img" src="${p.image}" alt="${p.name}"/><span style="font-size:12px;font-weight:600">${p.name.substring(0,35)}</span></div></td><td><span class="badge badge-primary">${p.category}</span></td><td>${fmt.price(p.price)}</td><td><span class="badge badge-danger">${p.discount}%</span></td><td><span class="${p.stock<5?'badge badge-warning':'badge badge-success'}">${p.stock}</span></td><td>⭐${p.rating}</td><td><div class="action-btns"><button class="btn-icon-sm btn-edit" onclick="openEditProductModal(${p.id})">✏️</button><button class="btn-icon-sm btn-del" onclick="delProduct(${p.id})">🗑️</button></div></td></tr>`).join('');
+}
+
+function adminFilterCatFn(cat){
+  const filtered=cat?PRODUCTS.filter(p=>p.category===cat):PRODUCTS;
+  const tbody=document.getElementById('admin-products-tbody');if(!tbody)return;
+  tbody.innerHTML=filtered.slice(0,25).map(p=>`<tr id="admin-row-${p.id}"><td><div style="display:flex;align-items:center;gap:10px"><img class="table-img" src="${p.image}" alt="${p.name}"/><span style="font-size:12px;font-weight:600">${p.name.substring(0,35)}</span></div></td><td><span class="badge badge-primary">${p.category}</span></td><td>${fmt.price(p.price)}</td><td><span class="badge badge-danger">${p.discount}%</span></td><td><span class="${p.stock<5?'badge badge-warning':'badge badge-success'}">${p.stock}</span></td><td>⭐${p.rating}</td><td><div class="action-btns"><button class="btn-icon-sm btn-edit" onclick="openEditProductModal(${p.id})">✏️</button><button class="btn-icon-sm btn-del" onclick="delProduct(${p.id})">🗑️</button></div></td></tr>`).join('');
+}
+
+function triggerGlobalSearch() {
+  const input = document.getElementById('nav-search-input');
+  const sugg = document.getElementById('search-suggestions');
+  if (sugg) sugg.style.display = 'none';
+  if (!input) return;
+  const q = input.value.trim();
+  if (!q) {
+    navigate('#/products');
+    return;
+  }
+  navigate(`#/products?q=${encodeURIComponent(q)}`);
+}
+
+function setupSearch(){
+  const input=document.getElementById('nav-search-input');
+  const sugg=document.getElementById('search-suggestions');
+  if(!input||!sugg)return;
+  
+  const handleInput=debounce(e=>{
+    const q=e.target.value.trim();
+    if(!q){sugg.style.display='none';return;}
+    const results=Search.query(q,PRODUCTS).slice(0,8);
+    if(!results.length){
+      sugg.innerHTML=`<div class="search-suggestion-item" style="color:var(--text-muted)">No matching products</div>`;
+      sugg.style.display='block';
+      return;
+    }
+    sugg.innerHTML=results.map(p=>`<div class="search-suggestion-item" onclick="navigate('#/product/${p.id}');document.getElementById('search-suggestions').style.display='none'"><img class="s-img" src="${p.image}" alt="${p.name}" loading="lazy"/><div><div class="s-name">${p.name.substring(0,45)}</div><div class="s-price">${fmt.price(p.price)}</div></div></div>`).join('')+`<div class="search-suggestion-item" style="justify-content:center;color:var(--primary);font-weight:700" onclick="triggerGlobalSearch()">See all results for "${q}" →</div>`;
+    sugg.style.display='block';
+  },150);
+  
+  input.removeEventListener('input', handleInput);
+  input.addEventListener('input',handleInput);
+  document.addEventListener('click',e=>{if(!e.target.closest('.nav-search'))sugg.style.display='none';});
+}
+
+// Hero Banner
+let heroIdx=0,heroTimer=null;
+function heroSlide(dir){
+  const slides=document.querySelectorAll('.hero-slide');if(!slides.length)return;
+  slides[heroIdx].classList.remove('active');slides[heroIdx].classList.add('exit');
+  setTimeout(()=>slides[heroIdx]?.classList.remove('exit'),600);
+  heroIdx=(heroIdx+dir+slides.length)%slides.length;
+  slides[heroIdx].classList.add('active');updateDots();
+}
+function goToSlide(i){
+  const slides=document.querySelectorAll('.hero-slide');if(!slides.length)return;
+  slides[heroIdx].classList.remove('active');heroIdx=i;slides[heroIdx].classList.add('active');updateDots();
+}
+function updateDots(){document.querySelectorAll('.hero-dot').forEach((d,i)=>d.classList.toggle('active',i===heroIdx));}
+function startHero(){clearInterval(heroTimer);heroTimer=setInterval(()=>heroSlide(1),4500);}
+
+// ============================================================
+// APP SHELL & ROUTING
+// ============================================================
+const app=document.getElementById('app');
+const navContainer=document.getElementById('nav-container');
+const footerContainer=document.getElementById('footer-container');
+
+function isAdmin(hash){return hash.startsWith('#/admin');}
+
+function setupNav(){
+  navContainer.innerHTML=renderNavbar();
+  footerContainer.innerHTML=renderFooter();
+  setupSearch();
+  const icon=document.getElementById('theme-icon');if(icon)icon.textContent=ThemeState.get().dark?'☀️':'🌙';
+}
+
+function renderPage(){
+  const hash=location.hash||'#/';
+  if(isAdmin(hash)){navContainer.innerHTML='';footerContainer.innerHTML='';return;}
+  setupNav();
+  app.classList.add('fade-in');setTimeout(()=>app.classList.remove('fade-in'),400);
+}
+
+function renderProductsPage(){
+  const h=location.hash||'#/';
+  if(!h.startsWith('#/products'))return;
+  app.innerHTML=renderProducts();
+}
+
+function updateBadges(){
+  const cb=document.getElementById('cart-badge');const wb=document.getElementById('wishlist-badge');
+  const cc=Cart.getCount();const wc=Wishlist.getCount();
+  if(cb){cb.textContent=cc;cb.style.display=cc>0?'flex':'none';}
+  if(wb){wb.textContent=wc;wb.style.display=wc>0?'flex':'none';}
+}
+
+function navigate(hash,replace=false){
+  if(replace)history.replaceState(null,'',hash);else history.pushState(null,'',hash);
+  routeRender(hash);
+}
+
+async function loadAdminDataAndRender(sub) {
+  if (backendActive) {
+    try {
+      app.innerHTML = `<div class="container" style="padding:100px 0;text-align:center"><div class="spinner" style="margin:0 auto"></div><p style="margin-top:16px;color:var(--text-secondary)">Loading secure Admin Panel data from database...</p></div>`;
+      const stats = await apiRequest("/admin/stats");
+      let ordersList = [];
+      let customersList = [];
+      if (sub === 'orders') {
+        ordersList = await apiRequest("/admin/orders");
+      } else if (sub === 'customers') {
+        customersList = await apiRequest("/admin/customers");
+      }
+      
+      const defaultStats = {...ADMIN_STATS, ...stats};
+      app.innerHTML = renderAdmin(sub);
+      
+      const statContainer = document.querySelector('.admin-stats-grid');
+      if (statContainer && stats) {
+        statContainer.children[0].querySelector('.stat-val').textContent = fmt.price(stats.totalRevenue || 124500);
+        statContainer.children[1].querySelector('.stat-val').textContent = stats.totalOrders || 48;
+        statContainer.children[2].querySelector('.stat-val').textContent = stats.totalProducts || PRODUCTS.length;
+        statContainer.children[3].querySelector('.stat-val').textContent = stats.totalCustomers || 156;
+      }
+      
+      if (sub === 'orders' && ordersList.length > 0) {
+        const tbody = document.querySelector('.data-table tbody');
+        if (tbody) {
+          tbody.innerHTML = ordersList.map(o => `<tr>
+            <td><strong>#${o.id || o._id}</strong></td>
+            <td>${o.customer_name || 'Customer'}</td>
+            <td>${o.items?.length || 1} items</td>
+            <td><strong>${fmt.price(o.total || 0)}</strong></td>
+            <td>${fmt.date(o.placedAt)}</td>
+            <td><div class="action-btns"><button class="btn-icon-sm btn-edit">👁️</button></div></td>
+          </tr>`).join('');
+        }
+      } else if (sub === 'customers' && customersList.length > 0) {
+        const tableBody = document.querySelector('.data-table tbody');
+        if (tableBody) {
+          tableBody.innerHTML = customersList.map(c => `<tr>
+            <td><div style="display:flex;align-items:center;gap:8px"><div style="width:32px;height:32px;background:var(--primary);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:700">${c.name[0]}</div><div><div style="font-weight:600;font-size:13px">${c.name}</div><div style="font-size:11px;color:var(--text-muted)">${c.email}</div></div></div></td>
+            <td>${c.mobile}</td>
+            <td><span class="badge badge-primary">Active</span></td>
+            <td><strong>-</strong></td>
+            <td style="color:var(--text-muted);font-size:13px">Joined</td>
+            <td><div class="action-btns"><button class="btn-icon-sm btn-edit">👁️</button></div></td>
+          </tr>`).join('');
+        }
+      }
+      return;
+    } catch(err) {
+      console.error("Admin data loading error, falling back", err);
+    }
+  }
+  app.innerHTML = renderAdmin(sub);
+}
+
+async function routeRender(hash){
+  window.scrollTo(0,0);
+  const route=hash.split('?')[0];
+  const qs=new URLSearchParams(hash.includes('?')?hash.split('?')[1]:'');
+
+  // Admin routes protection
+  if(route.startsWith('#/admin')){
+    if (!isAdminUser()) {
+      setupNav();
+      app.innerHTML = `<div class="container" style="padding:80px 0;text-align:center">
+        <div style="font-size:64px;margin-bottom:16px">🔐</div>
+        <h2 style="font-size:24px;font-weight:800;margin-bottom:8px">Admin Access Protected</h2>
+        <p style="color:var(--text-secondary);margin-bottom:24px">Please enter the Owner Security PIN to access the Admin Panel.</p>
+        <button class="btn btn-primary btn-lg" onclick="promptAdminPin(() => routeRender(location.hash))">🔑 Unlock Admin Mode</button>
+      </div>`;
+      promptAdminPin(() => routeRender(hash));
+      return;
+    }
+    navContainer.innerHTML='';footerContainer.innerHTML='';
+    const sub=route==='#/admin'||route==='#/admin/'?'dashboard':route.replace('#/admin/','');
+    await loadAdminDataAndRender(sub);
+    return;
+  }
+
+  renderPage();
+
+  if(route==='#/'||route==='#'){
+    await loadProducts();
+    app.innerHTML=renderHome();
+    heroIdx=0;
+    startHero();
+    return;
+  }
+  if(route==='#/login'){app.innerHTML=renderLogin();return;}
+  if(route==='#/signup'){app.innerHTML=renderSignup();return;}
+  if(route==='#/products'){
+    productFilters.category=qs.get('cat')||'all';
+    productFilters.sort=qs.get('sort')||'default';
+    productFilters.search=qs.get('q')||'';
+    productFilters.page=1;
+    await loadProducts();
+    app.innerHTML=renderProducts();
+    return;
+  }
+  if(route.startsWith('#/product/')){
+    const id=route.replace('#/product/','');
+    await loadProducts();
+    app.innerHTML=renderProductDetail(id);
+    return;
+  }
+  if(route==='#/cart'){app.innerHTML=renderCart();return;}
+  if(route==='#/checkout'){app.innerHTML=renderCheckout();return;}
+  if(route==='#/order-success'){app.innerHTML=renderOrderSuccess(qs.get('id'));return;}
+  if(route==='#/profile'){
+    app.innerHTML = `<div class="container" style="padding:100px 0;text-align:center"><div class="spinner" style="margin:0 auto"></div><p style="margin-top:16px;color:var(--text-secondary)">Loading Profile & Orders...</p></div>`;
+    const userOrders = await Orders.getAll();
+    app.innerHTML=renderProfile();
+    const orderContent = document.getElementById('profile-content');
+    if (orderContent) {
+      orderContent.innerHTML = renderOrdersTab(userOrders);
+    }
+    return;
+  }
+  if(route==='#/wishlist'){app.innerHTML=renderWishlist();return;}
+  if(route==='#/search'){app.innerHTML=renderSearch(qs.get('q')||'');return;}
+  if(route==='#/offers'){app.innerHTML=renderOffers();return;}
+  if(route==='#/contact'){app.innerHTML=renderContact();return;}
+  // Default
+  await loadProducts();
+  app.innerHTML=renderHome();
+  heroIdx=0;
+  startHero();
+}
+
+// Subscribe to state
+CartState.subscribe(()=>updateBadges());
+WishlistState.subscribe(()=>updateBadges());
+
+// Handle back/forward
+window.addEventListener('popstate',()=>routeRender(location.hash||'#/'));
+
+// Expose for onclick handlers
+window.navigate=navigate;
+window.heroSlide=heroSlide;
+window.goToSlide=goToSlide;
+window.doAddToCart=doAddToCart;
+window.doToggleWishlist=doToggleWishlist;
+window.removeItem=removeItem;
+window.updateQty=updateQty;
+window.moveToWish=moveToWish;
+window.applyCouponFn=applyCouponFn;
+window.copyCoupon=copyCoupon;
+window.placeOrderFn=placeOrderFn;
+window.doLogin=doLogin;
+window.doSignup=doSignup;
+window.doLogout=doLogout;
+window.togglePwdFn=togglePwdFn;
+window.toggleThemeFn=toggleThemeFn;
+window.selectPaymentFn=selectPaymentFn;
+window.changeQtyFn=changeQtyFn;
+window.addToCartFromDetail=addToCartFromDetail;
+window.buyNowFn=buyNowFn;
+window.changeImg=changeImg;
+window.switchTabFn=switchTabFn;
+window.filterByCategory=filterByCategory;
+window.clearFilters=clearFilters;
+window.sortProductsFn=sortProductsFn;
+window.goToPage=goToPage;
+window.filterByRating=filterByRating;
+window.updatePriceFilter=updatePriceFilter;
+window.setViewFn=setViewFn;
+window.showProfileTabFn=showProfileTabFn;
+window.showAddModal=showAddModal;
+window.openAddProductModal=openAddProductModal;
+window.saveProduct=saveProduct;
+window.delProduct=delProduct;
+window.adminSearchFn=adminSearchFn;
+window.adminFilterCatFn=adminFilterCatFn;
+window.isAdminUser=isAdminUser;
+window.toggleAdminMode=toggleAdminMode;
+window.openEditProductModal=openEditProductModal;
+window.selectPresetImage=selectPresetImage;
+window.autoCalcDiscount=autoCalcDiscount;
+window.autoCalcPriceFromDiscount=autoCalcPriceFromDiscount;
+window.saveEditProduct=saveEditProduct;
+window.promptAdminPin=promptAdminPin;
+window.verifyAdminPin=verifyAdminPin;
+window.openChangeAdminPinModal=openChangeAdminPinModal;
+window.saveNewAdminPin=saveNewAdminPin;
+window.renderAdminSettings=renderAdminSettings;
+window.saveStoreSettings=saveStoreSettings;
+window.handleImageFileUpload=handleImageFileUpload;
+window.selectPresetImageAdd=selectPresetImageAdd;
+window.autoCalcDiscountAdd=autoCalcDiscountAdd;
+window.triggerGlobalSearch=triggerGlobalSearch;
+
+// ── INIT ─────────────────────────────────────────────────────
+async function appInit() {
+  Theme.init();
+  await checkBackend();
+  if (backendActive) {
+    await loadProducts();
+    if (AuthState.get().isLoggedIn) {
+      await pullUserDataFromBackend();
+    }
+  }
+  document.getElementById('page-loader').classList.add('hidden');
+  await routeRender(location.hash||'#/');
+}
+appInit();
+</script>
+</body>
+</html>
