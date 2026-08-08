@@ -1303,12 +1303,105 @@ input, textarea, select { font-family: inherit; }
   .admin-nav-item { justify-content: center; padding: 10px; }
 }
 @media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+  }
+  .navbar {
+    height: auto;
+    min-height: var(--nav-height);
+    padding-bottom: 6px;
+  }
+  .nav-inner {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 12px 6px;
+    gap: 8px 10px;
+  }
+  .nav-logo {
+    order: 1;
+    gap: 6px;
+  }
+  .nav-logo .logo-icon {
+    font-size: 24px;
+  }
+  .nav-logo .logo-text {
+    font-size: 13px;
+    letter-spacing: -0.2px;
+  }
+  .nav-logo .logo-sub {
+    font-size: 8px;
+    opacity: 0.8;
+  }
+  .nav-actions {
+    order: 2;
+    margin-left: auto;
+    gap: 2px;
+  }
+  .nav-actions .btn-label {
+    display: none;
+  }
+  .nav-btn {
+    padding: 4px 6px;
+    border-radius: 6px;
+  }
+  .nav-btn .btn-icon {
+    font-size: 18px;
+  }
+  .nav-badge {
+    top: -2px;
+    right: 0px;
+    min-width: 15px;
+    height: 15px;
+    font-size: 9px;
+    padding: 0 3px;
+  }
+  .nav-search {
+    order: 3;
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 100%;
+    margin-top: 2px;
+  }
+  .search-wrap input {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .search-btn {
+    padding: 8px 14px;
+    font-size: 16px;
+  }
+  .admin-mode-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 12px;
+  }
+  .admin-topbar-actions {
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 100%;
+  }
+  .admin-topbar-btn {
+    padding: 3px 8px;
+    font-size: 11px;
+    flex: 1 1 auto;
+    text-align: center;
+  }
   .auth-card { grid-template-columns: 1fr; }
   .auth-illustration { display: none; }
-  .hero-slider { height: 280px; }
-  .hero-visual { font-size: 80px; }
-  .hero-content { padding: 0 20px; }
-  .category-grid { grid-template-columns: repeat(4, 1fr); }
+  .hero-slider { height: 250px; }
+  .hero-visual { font-size: 64px; }
+  .hero-content { padding: 0 16px; justify-content: center; text-align: center; }
+  .hero-text { max-width: 100%; }
+  .hero-badge { margin-bottom: 8px; font-size: 11px; padding: 2px 10px; }
+  .hero-title { font-size: 22px; margin-bottom: 6px; }
+  .hero-subtitle { font-size: 13px; margin-bottom: 16px; }
+  .hero-cta { padding: 8px 18px; font-size: 13px; }
+  .category-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .category-card { padding: 12px 6px; }
+  .category-card .cat-icon { font-size: 28px; margin-bottom: 4px; }
+  .category-card .cat-name { font-size: 11px; }
   .mini-banners { grid-template-columns: 1fr; }
   .product-detail-grid { grid-template-columns: 1fr; }
   .cart-page { grid-template-columns: 1fr; }
@@ -1318,16 +1411,25 @@ input, textarea, select { font-family: inherit; }
   .footer-grid { grid-template-columns: 1fr 1fr; gap: 24px; }
   .products-page { flex-direction: column; }
   .filter-sidebar { width: 100%; position: relative; top: 0; }
-  .nav-actions .btn-label { display: none; }
-  .nav-logo .logo-text { font-size: 13px; }
 }
 @media (max-width: 480px) {
-  .category-grid { grid-template-columns: repeat(3, 1fr); }
-  .hero-slider { height: 220px; }
-  .hero-title { font-size: 20px; }
-  .hero-subtitle { font-size: 13px; display: none; }
+  .category-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .category-card { padding: 10px 4px; }
+  .category-card .cat-icon { font-size: 24px; }
+  .category-card .cat-name { font-size: 10px; }
+  .hero-slider { height: 210px; }
+  .hero-title { font-size: 18px; }
+  .hero-visual { font-size: 48px; }
+  .hero-subtitle { font-size: 12px; display: none; }
   .footer-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .product-card { width: 165px; }
+  .product-info { padding: 8px; }
+  .price-current { font-size: 15px; }
+  .price-mrp { font-size: 11px; }
+  .price-off { font-size: 10px; }
+  .btn-add-cart { padding: 7px 6px; font-size: 11px; }
+  .container { padding: 0 10px; }
 }
 
 /* ============================================================
